@@ -1006,38 +1006,48 @@ cat("\n=== STEP 11: Training Neural Network Model ===\n")
 tryCatch({
   cat("Preparing data for neural network...\n")
   
-  # Create a simpler approach for neural network
+  # Simplified neural network approach - fix implementation
   # Select only numeric columns to avoid issues with factors
   numeric_cols <- sapply(train_data, is.numeric)
   cat("Number of numeric columns for neural network:", sum(numeric_cols), "\n")
   
   if(sum(numeric_cols) >= 3) {  # Ensure we have at least a few numeric features
-    # Create simplified datasets with only numeric features
-    train_data_nn <- train_data[, numeric_cols]
-    test_data_nn <- test_data[, numeric_cols]
+    # Explicitly specify the columns by name
+    nn_features <- names(train_data)[numeric_cols]
+    cat("Using numeric features:", paste(nn_features, collapse=", "), "\n")
     
-    # Add the class column back
-    train_data_nn$class <- train_data$class
-    test_data_nn$class <- test_data$class
+    # Create simplified datasets with only numeric features and class
+    train_data_nn <- train_data[, c(nn_features, "class")]
+    test_data_nn <- test_data[, c(nn_features, "class")]
     
     # Convert class to 0/1 for neural network
     train_target <- ifelse(train_data$class == "Good", 1, 0)
     test_target <- ifelse(test_data$class == "Good", 1, 0)
     
-    # Scale numeric features
-    train_data_nn[, numeric_cols] <- scale(train_data_nn[, numeric_cols])
+    # Scale numeric features - create separate scaled datasets
+    train_data_nn_scaled <- train_data_nn
+    test_data_nn_scaled <- test_data_nn
     
-    # Apply same scaling to test data
-    for(col in names(train_data_nn)[numeric_cols]) {
-      mean_val <- mean(train_data[, col])
-      sd_val <- sd(train_data[, col])
-      test_data_nn[, col] <- (test_data[, col] - mean_val) / sd_val
+    # Scale each numeric feature individually with error handling
+    for(col in nn_features) {
+      tryCatch({
+        mean_val <- mean(train_data[, col], na.rm = TRUE)
+        sd_val <- sd(train_data[, col], na.rm = TRUE)
+        if(sd_val > 0) {  # Only scale if standard deviation is positive
+          train_data_nn_scaled[, col] <- (train_data[, col] - mean_val) / sd_val
+          test_data_nn_scaled[, col] <- (test_data[, col] - mean_val) / sd_val
+        } else {
+          cat("Warning: Feature", col, "has zero variance. Using unscaled values.\n")
+        }
+      }, error = function(e) {
+        cat("Error scaling feature", col, ":", e$message, "\n")
+      })
     }
     
     # Train a simple neural network
     set.seed(123)
     nn_model <- train(
-      x = train_data_nn[, numeric_cols],
+      x = train_data_nn_scaled[, nn_features],
       y = factor(train_target, levels = c(0, 1), labels = c("Bad", "Good")),
       method = "nnet",
       trControl = ctrl,
@@ -1052,10 +1062,10 @@ tryCatch({
     print(nn_model)
     
     # Make predictions
-    nn_pred <- predict(nn_model, newdata = test_data_nn[, numeric_cols])
+    nn_pred <- predict(nn_model, newdata = test_data_nn_scaled[, nn_features])
     
     # Get probabilities
-    nn_probs <- predict(nn_model, newdata = test_data_nn[, numeric_cols], type = "prob")
+    nn_probs <- predict(nn_model, newdata = test_data_nn_scaled[, nn_features], type = "prob")
     
     # Use appropriate probability column
     if("Good" %in% colnames(nn_probs)) {
@@ -1088,6 +1098,8 @@ tryCatch({
   }
 }, error = function(e) {
   cat("ERROR in neural network training:", e$message, "\n")
+  cat("Stack trace:\n")
+  print(traceback())
   # Create dummy metrics
   nn_perf <<- list(
     accuracy = NA,
@@ -1263,7 +1275,12 @@ tryCatch({
     
     # Add each model's probabilities to the data frame
     for(model_name in names(prob_values)) {
-      roc_data[[model_name]] <- prob_values[[model_name]]
+      # Check if the probability values are numeric
+      if(is.numeric(prob_values[[model_name]])) {
+        roc_data[[model_name]] <- prob_values[[model_name]]
+      } else {
+        cat("WARNING: Probability values for", model_name, "are not numeric. Skipping.\n")
+      }
     }
     
     # Create empty plot
@@ -1275,13 +1292,24 @@ tryCatch({
     # Add ROC curves for each model with different colors
     colors <- rainbow(length(prob_values))
     auc_values <- numeric(length(prob_values))
+    names(auc_values) <- names(prob_values)
+    
+    # Track which models were successfully plotted
+    plotted_models <- c()
     
     for(i in 1:length(prob_values)) {
       model_name <- names(prob_values)[i]
       
+      # Skip if model name is not in roc_data (wasn't added due to non-numeric values)
+      if(!(model_name %in% names(roc_data))) {
+        cat("Skipping ROC curve for", model_name, "as it's not in the data frame\n")
+        next
+      }
+      
       # Try to create and plot ROC curve
       tryCatch({
-        pred_obj <- prediction(roc_data[, model_name+1], roc_data$actual)
+        # Correctly access the probability column by name
+        pred_obj <- prediction(roc_data[[model_name]], roc_data$actual)
         roc_perf <- performance(pred_obj, "tpr", "fpr")
         auc_value <- performance(pred_obj, "auc")@y.values[[1]]
         auc_values[i] <- auc_value
@@ -1295,20 +1323,27 @@ tryCatch({
         text(text_x, text_y, 
              paste(model_name, "(AUC = ", round(auc_value, 3), ")", sep = ""), 
              col = colors[i], cex = 0.8)
+             
+        # Add to list of successfully plotted models
+        plotted_models <- c(plotted_models, model_name)
+        
       }, error = function(e) {
         cat("Error plotting ROC curve for", model_name, ":", e$message, "\n")
       })
     }
     
-    # Store the best model based on AUC
-    if(sum(!is.na(auc_values)) > 0) {
+    # Store the best model based on AUC (only from successfully plotted models)
+    auc_values <- auc_values[!is.na(auc_values) & auc_values > 0]
+    if(length(auc_values) > 0) {
       best_idx <- which.max(auc_values)
-      best_model_name <- names(prob_values)[best_idx]
+      best_model_name <- names(auc_values)[best_idx]
       best_model_auc <- auc_values[best_idx]
       
       # Store for conclusion
       cat("\nBest model based on ROC curves: ", best_model_name, 
           " (AUC = ", round(best_model_auc, 3), ")\n", sep="")
+    } else {
+      cat("\nCould not determine best model from ROC curves\n")
     }
   } else {
     cat("No probability values available for ROC curves\n")
