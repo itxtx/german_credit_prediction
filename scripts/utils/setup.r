@@ -65,12 +65,15 @@ setup_packages <- function() {
   
   return(required_packages)
 }
-
-# Add a safety function to check for all old boost models and related objects
 check_for_old_models <- function() {
   debug_print("Checking for old model references...")
   # List of patterns to check for
-  patterns <- c("adaboost", "gbm", "^ada", "boost")
+  patterns <- c("adaboost", "gbm", "^ada")  # Removed "boost" pattern
+  
+  # Alternatively, keep the "boost" pattern but explicitly exclude critical functions
+  # patterns <- c("adaboost", "gbm", "^ada", "boost")
+  # critical_functions <- c("check_xgboost", "install_xgboost", "resolve_xgboost_issues", "setup_alternative_xgboost")
+  
   found_vars <- c()
   
   # Get all variables in the global environment
@@ -83,6 +86,9 @@ check_for_old_models <- function() {
       found_vars <- c(found_vars, matches)
     }
   }
+  
+  # Exclude critical functions if you kept the "boost" pattern
+  # found_vars <- setdiff(found_vars, critical_functions)
   
   # If we found any matches, warn and remove them
   if(length(found_vars) > 0) {
@@ -105,7 +111,6 @@ check_for_old_models <- function() {
     return(TRUE)
   }
 }
-
 # Check if xgboost is installed, and install it if not
 check_xgboost <- function() {
   debug_print("Checking for XGBoost package")

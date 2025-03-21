@@ -1,14 +1,16 @@
 version: '3'
-
 services:
   r-analysis:
     build: .
     image: german-credit-analysis
     volumes:
+      - ./scripts:/app/scripts  # Add this line to mount the scripts directory
       - ./data:/app/data
       - ./results:/app/results
       - ./reports:/app/reports
-    command: R --vanilla -e "source('scripts/05_analysis.R')"
+
+    entrypoint: ["Rscript"]
+    command: scripts/05_analysis.R
   
   r-interactive:
     build: .
