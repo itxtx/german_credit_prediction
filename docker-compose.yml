@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  r-analysis:
+    build: .
+    image: german-credit-analysis
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./reports:/app/reports
+    command: R --vanilla -e "source('scripts/05_analysis.R')"
+  
+  r-interactive:
+    build: .
+    image: german-credit-analysis
+    volumes:
+      - ./:/app
+    command: R
