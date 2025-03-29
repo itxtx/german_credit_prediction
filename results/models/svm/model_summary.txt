@@ -7,7 +7,7 @@ Accuracy: 0.6733
 Precision: 0.8544
 Recall: 0.6429
 F1: 0.7337
-Auc: NA
+Auc: 0.7639
 
 CONFUSION MATRIX:
           Reference

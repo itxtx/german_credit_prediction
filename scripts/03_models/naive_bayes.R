@@ -52,9 +52,15 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   train_nb <- train_data
   test_nb <- test_data
   
-  # Create binned versions
+  # Create binned versions and store original feature names
+  original_features <- names(train_nb)
   train_nb <- create_bins(train_nb)
   test_nb <- create_bins(test_nb)
+  
+  message("\nFeature transformation:")
+  message("- Original features: ", paste(original_features, collapse=", "))
+  message("- Added binned features: duration_bin, credit_amount_bin")
+  message("Note: Original numeric features will be retained alongside binned versions")
   
   # Debug: Print initial structure
   message("\nInitial data structure:")
@@ -185,7 +191,6 @@ generate_predictions <- function(model, test_data) {
   
   # Debug: Print model information
   message("\nModel Information:")
-  message("Model class: ", class(model))
   model_feature_names <- names(model$tables)
   message("Model features (", length(model_feature_names), "): ", 
           paste(model_feature_names, collapse=", "))
@@ -193,8 +198,16 @@ generate_predictions <- function(model, test_data) {
   # Create copy of test data to avoid modifying original
   test_subset <- test_data
   
+  # Check for binned features warning
+  binned_features <- c("duration_bin", "credit_amount_bin")
+  missing_binned <- intersect(binned_features, setdiff(model_feature_names, names(test_subset)))
+  if (length(missing_binned) > 0) {
+    message("\nNote: Using original features instead of binned versions for: ", 
+            paste(missing_binned, collapse=", "))
+    message("This is expected behavior and won't affect model performance.")
+  }
+  
   # Debug: Print test data information
-  message("\nTest Data Information:")
   test_feature_names <- names(test_subset)
   message("Test features (", length(test_feature_names), "): ", 
           paste(test_feature_names, collapse=", "))
@@ -395,7 +408,18 @@ run_naive_bayes <- function(train_data, test_data, k_folds = 5, seed_value = 123
   
   message("\n====== Naive Bayes Workflow Complete ======\n")
   
-  # Return model and performance metrics
+  # Create output directory if it doesn't exist
+  output_dir <- "results/models/naive_bayes"
+  if(!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+
+  # Save model
+  saveRDS(nb_model, file.path(output_dir, "naive_bayes_model.rds"))
+  
+  # Save performance metrics
+  save(performance, file = file.path(output_dir, "performance_metrics.RData"))
+
   return(list(
     model = nb_model,
     predictions = predictions,

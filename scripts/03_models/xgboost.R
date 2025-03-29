@@ -172,42 +172,24 @@ train_xgboost_model <- function(train_data, target_col = "class") {
 generate_predictions <- function(model, test_data) {
   message("\n=== Generating Predictions ===")
   
-  # Prepare test data - we pass NULL as train_data since we only need test predictions
-  test_prepared <- prepare_for_xgboost(NULL, test_data)
-  
-  # Ensure feature names match
-  if (!is.null(model$feature_names)) {
-    # Get the column order from the model
-    model_features <- model$feature_names
-    
-    # Check if all required features exist
-    missing_features <- setdiff(model_features, colnames(test_prepared$test_matrix))
-    if (length(missing_features) > 0) {
-      stop("Missing features in test data: ", paste(missing_features, collapse = ", "))
+  # If test_data is not a matrix, convert it
+  if(!inherits(test_data, "xgb.DMatrix")) {
+    if(is.data.frame(test_data)) {
+      test_data <- prepare_for_xgboost(NULL, test_data)$test_matrix
     }
-    
-    # Reorder columns to match model's feature order
-    test_matrix <- test_prepared$test_matrix[, model_features, drop = FALSE]
-  } else {
-    test_matrix <- test_prepared$test_matrix
   }
   
-  # Generate predictions using the test matrix
-  tryCatch({
-    pred_prob <- predict(model, test_matrix)
-    pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")
-    
-    return(list(
-      class = pred_class,
-      prob = pred_prob,
-      all_probs = data.frame(Bad = 1 - pred_prob, Good = pred_prob)
-    ))
-  }, error = function(e) {
-    message("Error details:")
-    message("Model features: ", paste(model$feature_names, collapse = ", "))
-    message("Test data features: ", paste(colnames(test_matrix), collapse = ", "))
-    stop("Prediction error: ", e$message)
-  })
+  # Generate probabilities
+  pred_prob <- predict(model, test_data)
+  
+  # Convert to class predictions
+  pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")
+  pred_class <- factor(pred_class, levels = c("Bad", "Good"))
+  
+  return(list(
+    class = pred_class,
+    prob = pred_prob
+  ))
 }
 
 # Function to evaluate model performance
@@ -355,25 +337,29 @@ plot_shap_values <- function(model, test_matrix, output_dir = "results/models/xg
     return(NULL)
   }
   
-  # Create SHAP directory if it doesn't exist
-  shap_dir <- file.path(output_dir, "shap")
-  if(!dir.exists(shap_dir)) {
-    dir.create(shap_dir, recursive = TRUE)
-    message("Created directory: ", shap_dir)
-  }
-  
   tryCatch({
-    # Convert test_matrix to DMatrix
-    dtest <- xgboost::xgb.DMatrix(test_matrix)
-    
     # Get feature names from the model
     feature_names <- model$feature_names
     
-    # Ensure test_matrix has the same number of columns as feature names
+    # Ensure test_matrix has the same features as the model
     if(ncol(test_matrix) != length(feature_names)) {
-      stop(sprintf("Mismatch in dimensions: test_matrix has %d columns but there are %d feature names", 
-                  ncol(test_matrix), length(feature_names)))
+      message("Adjusting test matrix to match model features...")
+      
+      # Find common features
+      common_features <- intersect(colnames(test_matrix), feature_names)
+      
+      # Check if we have enough matching features
+      if(length(common_features) < length(feature_names) * 0.8) {
+        warning("Less than 80% of features match between model and test data")
+      }
+      
+      # Subset test_matrix to only include model features
+      test_matrix <- test_matrix[, common_features, drop = FALSE]
+      feature_names <- common_features
     }
+    
+    # Convert test_matrix to DMatrix
+    dtest <- xgboost::xgb.DMatrix(test_matrix)
     
     # Compute SHAP values using xgboost's predict function
     shap_values <- xgboost::predict(model, dtest, predcontrib = TRUE)
@@ -424,12 +410,12 @@ plot_shap_values <- function(model, test_matrix, output_dir = "results/models/xg
     
     # Save the plot
     ggplot2::ggsave(
-      file.path(shap_dir, "shap_summary.png"),
+      file.path(output_dir, "shap_summary.png"),
       summary_plot,
       width = 12,
       height = 8
     )
-    message("SHAP summary plot saved to: ", file.path(shap_dir, "shap_summary.png"))
+    message("SHAP summary plot saved to: ", file.path(output_dir, "shap_summary.png"))
     
     # Generate individual feature plots for top 5 features
     for(i in 1:min(5, length(top_features))) {
@@ -448,7 +434,7 @@ plot_shap_values <- function(model, test_matrix, output_dir = "results/models/xg
       
       # Save the plot
       ggplot2::ggsave(
-        file.path(shap_dir, paste0("shap_", feature, ".png")),
+        file.path(output_dir, paste0("shap_", feature, ".png")),
         feature_plot,
         width = 10,
         height = 6

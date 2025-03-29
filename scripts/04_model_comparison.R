@@ -259,22 +259,30 @@ visualize_model_comparison <- function(comparison_table, output_dir = "results/m
   
   # 3. Create radar chart if fmsb package is available
   if(requireNamespace("fmsb", quietly = TRUE)) {
-    # Prepare data for radar chart
+    # Get metrics columns (exclude Model and _best columns)
+    metrics <- setdiff(names(comparison_table), c("Model", grep("_best$", names(comparison_table), value = TRUE)))
+    
+    # Prepare data for radar chart - transpose so metrics are axes
     radar_data <- as.data.frame(t(comparison_table[, metrics]))
     colnames(radar_data) <- comparison_table$Model
     
+    # Ensure row names are set to metrics
+    rownames(radar_data) <- metrics
+    
     # Add max and min rows required by fmsb
     radar_data <- rbind(
-      apply(radar_data, 2, max, na.rm = TRUE),
-      apply(radar_data, 2, min, na.rm = TRUE),
+      rep(1, ncol(radar_data)),  # Max value for all metrics is 1
+      rep(0, ncol(radar_data)),  # Min value for all metrics is 0
       radar_data
     )
     
     # Replace NA with min value
-    radar_data[is.na(radar_data)] <- min(radar_data, na.rm = TRUE)
+    radar_data[is.na(radar_data)] <- 0
     
     # Create radar chart
     png(file.path(output_dir, "radar_chart.png"), width = 800, height = 800)
+    par(mar = c(1, 1, 2, 1))  # Adjust margins
+    
     fmsb::radarchart(
       radar_data,
       pcol = rainbow(ncol(radar_data)),
@@ -283,10 +291,13 @@ visualize_model_comparison <- function(comparison_table, output_dir = "results/m
       cglcol = "grey",
       cglty = 1,
       axislabcol = "grey",
-      caxislabels = seq(0, 1, 0.25),
+      caxislabels = seq(0, 1, 0.2),
       cglwd = 0.8,
-      title = "Model Comparison - Radar Chart"
+      title = "Model Performance Comparison",
+      axistype = 1,  # Show axis labels
+      seg = 5  # Number of segments
     )
+    
     # Add legend
     legend(
       "topright",
@@ -294,6 +305,7 @@ visualize_model_comparison <- function(comparison_table, output_dir = "results/m
       col = rainbow(ncol(radar_data)),
       lty = 1,
       lwd = 2,
+      pch = 20,
       bty = "n"
     )
     dev.off()
@@ -313,6 +325,12 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
   if(!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
     message("Created directory: ", output_dir)
+  }
+  
+  # Verify pROC package is available
+  if(!requireNamespace("pROC", quietly = TRUE)) {
+    message("Installing pROC package...")
+    install.packages("pROC", repos = "https://cloud.r-project.org")
   }
   
   # Ensure test data has been loaded
@@ -439,33 +457,90 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
   if(length(pred_probs) >= 2) {
     message("Comparing ROC curves for ", length(pred_probs), " models")
     
-    # Plot ROC curves
-    png(file.path(output_dir, "roc_comparison.png"), width = 800, height = 800)
+    # Define the output file path
+    output_file <- file.path(output_dir, "combined_roc_curves.png")
+    message("Will save ROC curves to: ", output_file)
     
-    # Get model names and colors
-    model_names <- names(pred_probs)
-    colors <- rainbow(length(model_names))
+    tryCatch({
+      # Create combined ROC plot with enhanced styling
+      png(output_file, width = 1200, height = 1000, res = 120)
+      on.exit(dev.off(), add = TRUE)  # Ensure device is closed even if error occurs
+      
+      # Set up the plotting area with margins
+      par(mar = c(5, 5, 4, 8), xaxs = "i", yaxs = "i")
+      
+      # Initialize plot with first model
+      model_name <- names(pred_probs)[1]
+      roc_obj <- pROC::roc(actual, pred_probs[[model_name]])
+      
+      # Create base plot without duplicate arguments
+      plot(roc_obj, 
+           main = "Comparison of ROC Curves",
+           col = rainbow(length(pred_probs))[1], 
+           lwd = 3,
+           cex.main = 1.5,
+           cex.lab = 1.2,
+           cex.axis = 1.1,
+           xlab = "False Positive Rate (1 - Specificity)",
+           ylab = "True Positive Rate (Sensitivity)")
+      
+      # Add grid
+      grid(nx = 10, ny = 10, col = "lightgray", lty = "dotted")
+      
+      # Add other ROC curves
+      results <- list()
+      results[[model_name]] <- list(roc = roc_obj, auc = pROC::auc(roc_obj))
+      
+      for(i in 2:length(pred_probs)) {
+        model_name <- names(pred_probs)[i]
+        roc_obj <- pROC::roc(actual, pred_probs[[model_name]])
+        lines(roc_obj, col = rainbow(length(pred_probs))[i], lwd = 3)
+        results[[model_name]] <- list(roc = roc_obj, auc = pROC::auc(roc_obj))
+      }
+      
+      # Add diagonal reference line
+      abline(a = 0, b = 1, lty = 2, col = "gray50", lwd = 2)
+      
+      # Add legend with AUC values (sorted by AUC)
+      auc_values <- sapply(results, function(x) x$auc)
+      sorted_idx <- order(auc_values, decreasing = TRUE)
+      legend_text <- paste0(
+        gsub("_", " ", names(pred_probs)[sorted_idx]), 
+        " (AUC = ", 
+        sprintf("%.3f", auc_values[sorted_idx]), 
+        ")"
+      )
+      
+      # Position legend outside the plot
+      legend("bottomright",
+             legend = legend_text,
+             col = rainbow(length(pred_probs))[sorted_idx],
+             lwd = 3,
+             bty = "n",
+             cex = 0.9)
+      
+      # Add box around plot
+      box(lwd = 2)
+      
+      message("Successfully created ROC plot")
+      
+    }, error = function(e) {
+      message("ERROR creating ROC plot: ", e$message)
+      return(NULL)
+    })
     
-    # Plot ROC curves using the utility function
-    results <- plot_multiple_roc_curves(
-      pred_probs = pred_probs,
-      actual = actual,
-      model_names = model_names,
-      colors = colors
-    )
-    dev.off()
-    message("Saved ROC comparison plot to ", file.path(output_dir, "roc_comparison.png"))
-    
-    # Extract AUC values
-    auc_values <- sapply(results, function(x) x$auc)
-    message("AUC values:")
-    for(i in 1:length(auc_values)) {
-      message("  ", names(auc_values)[i], ": ", round(auc_values[i], 4))
+    # Verify file was created
+    if(file.exists(output_file)) {
+      message("Successfully saved combined ROC curves to ", output_file)
+    } else {
+      message("WARNING: Failed to save ROC curves to ", output_file)
     }
     
+    # Return results
     return(list(
       roc_results = results,
-      auc_values = auc_values
+      auc_values = auc_values,
+      output_file = output_file
     ))
   } else {
     message("WARNING: Not enough models with predictions to compare ROC curves")
@@ -657,7 +732,7 @@ create_comparison_report <- function(comparison_table, best_model_info, roc_resu
     cat("\n")
     
     cat("### 5.2 ROC Curves\n\n")
-    cat("![ROC Curve Comparison](roc_comparison.png)\n\n")
+    cat("![ROC Curve Comparison](", roc_results$output_file, ")\n\n")
   }
   
   # Visualization section

@@ -59,19 +59,22 @@ prepare_for_svm <- function(train_data, test_data) {
     message("One-hot encoding ", length(factor_cols), " categorical variables...")
     
     for(col in factor_cols) {
-      # Create dummy variables using model.matrix
-      train_dummies <- model.matrix(~ 0 + get(col), data = train_svm)
-      test_dummies <- model.matrix(~ 0 + get(col), data = test_svm)
+      # Ensure test data has same levels as train data
+      test_svm[[col]] <- factor(test_svm[[col]], levels = levels(train_svm[[col]]))
       
-      # Fix column names (remove "get(col)" prefix)
-      colnames(train_dummies) <- gsub("^get\\(col\\)", col, colnames(train_dummies))
-      colnames(test_dummies) <- gsub("^get\\(col\\)", col, colnames(test_dummies))
+      # Create dummy variables
+      train_matrix <- model.matrix(~ get(col) - 1, data = train_svm)
+      test_matrix <- model.matrix(~ get(col) - 1, data = test_svm)
+      
+      # Fix column names
+      colnames(train_matrix) <- gsub("^get\\(col\\)", col, colnames(train_matrix))
+      colnames(test_matrix) <- gsub("^get\\(col\\)", col, colnames(test_matrix))
       
       # Add to datasets
-      train_svm <- cbind(train_svm, train_dummies)
-      test_svm <- cbind(test_svm, test_dummies)
+      train_svm <- cbind(train_svm, train_matrix)
+      test_svm <- cbind(test_svm, test_matrix)
       
-      # Remove original categorical column
+      # Remove original column
       train_svm[[col]] <- NULL
       test_svm[[col]] <- NULL
     }
@@ -199,18 +202,35 @@ train_svm_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
 
 # Function to generate predictions using the trained model
 generate_predictions <- function(model, test_data) {
+  message("\n=== Generating Predictions ===")
+  
   # Generate predictions
   pred_class <- predict(model, test_data)
-  pred_prob <- predict(model, test_data, probability = TRUE)
   
-  # Extract probabilities
-  prob_attr <- attr(pred_prob, "probabilities")
-  pos_class_prob <- prob_attr[, "Good"]
+  # Handle different types of SVM models
+  if (inherits(model, "svm")) {
+    # e1071 svm model
+    pred_prob <- predict(model, test_data, probability = TRUE)
+    prob_attr <- attr(pred_prob, "probabilities")
+    pos_class_prob <- prob_attr[, "Good"]
+  } else if (inherits(model, "train")) {
+    # caret trained model
+    pred_prob <- predict(model, test_data, type = "prob")
+    pos_class_prob <- pred_prob[, "Good"]
+  } else {
+    warning("Unknown model type. Using dummy probabilities.")
+    pos_class_prob <- ifelse(pred_class == "Good", 0.75, 0.25)
+  }
+  
+  # Ensure probabilities are numeric and between 0 and 1
+  pos_class_prob <- as.numeric(pos_class_prob)
+  pos_class_prob <- pmin(pmax(pos_class_prob, 0), 1)
   
   return(list(
     class = pred_class,
     prob = pos_class_prob,
-    all_probs = prob_attr
+    all_probs = if (exists("prob_attr")) prob_attr else 
+                data.frame(Bad = 1 - pos_class_prob, Good = pos_class_prob)
   ))
 }
 
