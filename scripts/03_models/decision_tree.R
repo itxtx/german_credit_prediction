@@ -53,7 +53,8 @@ prepare_for_decision_tree <- function(train_data, test_data) {
       test_dt[[col]][is.na(test_dt[[col]])] <- col_mean
     } else if(is.factor(train_dt[[col]])) {
       # For factor columns, replace NA with mode from training data
-      mode_val <- names(sort(table(train_dt[[col]], na.rm = TRUE), decreasing = TRUE))[1]
+      # Remove NA values before calculating mode
+      mode_val <- names(sort(table(train_dt[[col]][!is.na(train_dt[[col]])]), decreasing = TRUE))[1]
       train_dt[[col]][is.na(train_dt[[col]])] <- mode_val
       test_dt[[col]][is.na(test_dt[[col]])] <- mode_val
     }

@@ -165,8 +165,16 @@ train_random_forest <- function(prepared_data, k_folds = 5, seed_value = 123) {
     message("\nTop 10 Variables by Importance:")
     if(!is.null(rf_model$finalModel)) {
       var_imp <- randomForest::importance(rf_model$finalModel)
-      var_imp_sorted <- sort(var_imp[, "MeanDecreaseGini"], decreasing = TRUE)
-      print(head(var_imp_sorted, 10))
+      var_imp_df <- data.frame(
+        Variable = rownames(var_imp),
+        Importance = var_imp[, "MeanDecreaseGini"]
+      )
+      
+      # Rename columns to match expected names for plotting function
+      names(var_imp_df) <- c("Feature", "Gain")
+      
+      var_imp_df <- var_imp_df[order(var_imp_df$Gain, decreasing = TRUE), ]
+      print(head(var_imp_df, 10))
     }
     
     return(rf_model)
@@ -317,7 +325,10 @@ evaluate_random_forest <- function(predictions, actual, model, prepared_data = N
         )
       }
       
-      var_imp_df <- var_imp_df[order(var_imp_df$Importance, decreasing = TRUE), ]
+      # Rename columns to match expected names for plotting function
+      names(var_imp_df) <- c("Feature", "Gain")
+      
+      var_imp_df <- var_imp_df[order(var_imp_df$Gain, decreasing = TRUE), ]
       
       # Create and save the plot
       importance_plot <- plot_variable_importance(
@@ -350,7 +361,10 @@ evaluate_random_forest <- function(predictions, actual, model, prepared_data = N
         )
       }
       
-      var_imp_df <- var_imp_df[order(var_imp_df$Importance, decreasing = TRUE), ]
+      # Rename columns to match expected names for plotting function
+      names(var_imp_df) <- c("Feature", "Gain")
+      
+      var_imp_df <- var_imp_df[order(var_imp_df$Gain, decreasing = TRUE), ]
       
       # Create and save the plot
       importance_plot <- plot_variable_importance(

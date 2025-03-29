@@ -252,10 +252,10 @@ evaluate_logistic_regression <- function(predictions, actual, model = NULL, outp
     # Extract coefficients
     coefs <- coef(model$finalModel)[-1]  # Remove intercept
     importance_df <- data.frame(
-      Variable = names(coefs),
-      Importance = abs(coefs)
+      Feature = names(coefs),
+      Gain = abs(coefs)
     )
-    importance_df <- importance_df[order(importance_df$Importance, decreasing = TRUE), ]
+    importance_df <- importance_df[order(importance_df$Gain, decreasing = TRUE), ]
     
     # Create and save plot
     importance_plot <- plot_variable_importance(
