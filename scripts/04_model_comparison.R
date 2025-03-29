@@ -354,9 +354,20 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
         # Different models might need different inputs for prediction
         if(model_name == "xgboost") {
           # For XGBoost, we need to prepare the test data differently
-          source("scripts/03_models/xgboost_model.R")
+          source("scripts/03_models/xgboost.R")
           prepared_data <- prepare_for_xgboost(train_data, test_data)
           predictions <- generate_predictions(model, prepared_data$test_matrix)
+        } else if(model_name == "random_forest") {
+          # Add specific handling for random forest
+          # First check if all required columns are present
+          required_cols <- names(model$forest$xlevels)  # Get required feature names
+          missing_cols <- setdiff(required_cols, names(test_data))
+          
+          if(length(missing_cols) > 0) {
+            message("WARNING: Missing columns for random_forest: ", paste(missing_cols, collapse=", "))
+            return(NULL)
+          }
+          predictions <- generate_predictions(model, test_data)
         } else {
           # For other models, we can use the test data directly
           predictions <- generate_predictions(model, test_data)
@@ -367,6 +378,8 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
         message("Generated predictions for ", model_name)
       }, error = function(e) {
         message("ERROR generating predictions for ", model_name, ": ", e$message)
+        # Print additional debug information
+        message("Available columns in test_data: ", paste(names(test_data), collapse=", "))
       })
     } else {
       message("WARNING: Script not found for ", model_name, ". Skipping...")
@@ -649,9 +662,40 @@ create_comparison_report <- function(comparison_table, best_model_info, roc_resu
   return(report_file)
 }
 
+# Add this function at the beginning of the script
+validate_test_data <- function(test_data, model_list) {
+  message("\n=== Validating Test Data ===")
+  
+  # Check if test data exists
+  if(is.null(test_data)) {
+    message("ERROR: Test data is NULL")
+    return(FALSE)
+  }
+  
+  # Check for required columns
+  required_cols <- c("class")  # Add base required columns
+  missing_cols <- setdiff(required_cols, names(test_data))
+  
+  if(length(missing_cols) > 0) {
+    message("ERROR: Missing required columns: ", paste(missing_cols, collapse=", "))
+    return(FALSE)
+  }
+  
+  # Print available columns for debugging
+  message("Available columns in test data: ", paste(names(test_data), collapse=", "))
+  
+  return(TRUE)
+}
+
 # Main function to run the entire model comparison workflow
 run_model_comparison <- function(model_names = model_list, primary_metric = "auc", secondary_metric = "f1") {
   message("\n====== Running Model Comparison Workflow ======\n")
+  
+  # Validate test data first
+  if(!validate_test_data(test_data, model_names)) {
+    message("ERROR: Test data validation failed")
+    return(NULL)
+  }
   
   # Step 1: Load model results
   all_results <- load_model_results(model_names)

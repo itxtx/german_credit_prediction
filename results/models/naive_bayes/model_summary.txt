@@ -1,0 +1,24 @@
+=== NAIVE BAYES MODEL SUMMARY ===
+
+Date:  2025-03-29 
+
+PERFORMANCE METRICS:
+Accuracy: 0.69
+Precision: 0.7882
+Recall: 0.7619
+F1: 0.7748
+Auc: 0.7164
+
+CONFUSION MATRIX:
+          Reference
+Prediction Bad Good
+      Bad   47   50
+      Good  43  160
+
+DETAILED STATISTICS:
+         Sensitivity          Specificity       Pos Pred Value       Neg Pred Value 
+           0.7619048            0.5222222            0.7881773            0.4845361 
+           Precision               Recall                   F1           Prevalence 
+           0.7881773            0.7619048            0.7748184            0.7000000 
+      Detection Rate Detection Prevalence    Balanced Accuracy 
+           0.5333333            0.6766667            0.6420635 

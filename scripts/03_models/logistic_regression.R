@@ -190,7 +190,7 @@ generate_predictions <- function(model, test_data) {
 }
 
 # Function to evaluate model performance
-evaluate_logistic_regression <- function(predictions, actual, output_dir = "results/models/logistic_regression") {
+evaluate_logistic_regression <- function(predictions, actual, model = NULL, output_dir = "results/models/logistic_regression") {
   message("\n=== Evaluating Model Performance ===")
   
   # Create output directory if it doesn't exist
@@ -248,9 +248,9 @@ evaluate_logistic_regression <- function(predictions, actual, output_dir = "resu
   }
   
   # If available, save variable importance plot
-  if(requireNamespace("ggplot2", quietly = TRUE) && !is.null(logistic_model$finalModel)) {
+  if(requireNamespace("ggplot2", quietly = TRUE) && !is.null(model) && !is.null(model$finalModel)) {
     # Extract coefficients
-    coefs <- coef(logistic_model$finalModel)[-1]  # Remove intercept
+    coefs <- coef(model$finalModel)[-1]  # Remove intercept
     importance_df <- data.frame(
       Variable = names(coefs),
       Importance = abs(coefs)
@@ -317,7 +317,7 @@ run_logistic_regression <- function(train_data, test_data, k_folds = 5, seed_val
   predictions <- generate_predictions(logistic_model, test_data)
   
   # Step 4: Evaluate model performance
-  performance <- evaluate_logistic_regression(predictions, test_data$class)
+  performance <- evaluate_logistic_regression(predictions, test_data$class, model = logistic_model)
   
   message("\n====== Logistic Regression Workflow Complete ======\n")
   

@@ -4,13 +4,11 @@ services:
     build: .
     image: german-credit-analysis
     volumes:
-      - ./scripts:/app/scripts  # Add this line to mount the scripts directory
+      - ./scripts:/app/scripts
       - ./data:/app/data
       - ./results:/app/results
       - ./reports:/app/reports
-
-    entrypoint: ["Rscript"]
-    command: scripts/05_analysis.R
+    command: tail -f /dev/null  # This keeps the container running
   
   r-interactive:
     build: .

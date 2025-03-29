@@ -344,35 +344,32 @@ evaluate_xgboost <- function(predictions, actual_label, model, output_dir = "res
     message("Confusion matrix plot saved to: ", file.path(output_dir, "confusion_matrix.png"))
   }
   
-  # Plot feature importance
-  if(requireNamespace("ggplot2", quietly = TRUE) && requireNamespace("xgboost", quietly = TRUE)) {
-    # Get feature importance
-    importance <- xgboost::xgb.importance(feature_names = model$feature_names, model = model)
-    importance_df <- as.data.frame(importance)
-    
-    # Create and save the plot
+  # Get feature importance
+  importance <- xgb.importance(model = model)
+  
+  # Check if importance data exists
+  if (!is.null(importance) && nrow(importance) > 0) {
+    # Create importance plot
     importance_plot <- plot_variable_importance(
-      importance_df[, c("Feature", "Gain")],
-      title = "XGBoost - Feature Importance (Gain)",
-      max_vars = 20
-    )
-    # Rename columns to match plot_variable_importance expectations
-    colnames(importance_df)[colnames(importance_df) == "Feature"] <- "Variable"
-    colnames(importance_df)[colnames(importance_df) == "Gain"] <- "Importance"
-    
-    importance_plot <- plot_variable_importance(
-      importance_df[, c("Variable", "Importance")],
+      importance_df = data.frame(
+        Feature = importance$Feature,
+        Gain = importance$Gain
+      ),
       title = "XGBoost - Feature Importance (Gain)",
       max_vars = 20
     )
     
-    ggplot2::ggsave(
-      file.path(output_dir, "feature_importance.png"),
-      importance_plot,
-      width = 10,
-      height = 8
-    )
-    message("Feature importance plot saved to: ", file.path(output_dir, "feature_importance.png"))
+    # Save the plot if it was created successfully
+    if (!is.null(importance_plot)) {
+      ggsave(
+        file.path(output_dir, "feature_importance.png"),
+        importance_plot,
+        width = 10,
+        height = 8
+      )
+    }
+  } else {
+    warning("No feature importance data available")
   }
   
   # Save performance results
@@ -436,8 +433,16 @@ plot_shap_values <- function(model, test_matrix, output_dir = "results/models/xg
   }
   
   tryCatch({
-    # Compute SHAP values
-    shap_values <- xgboost::predict(model, test_matrix, predcontrib = TRUE)
+    # Convert test_matrix to DMatrix
+    dtest <- xgboost::xgb.DMatrix(test_matrix)
+    
+    # Compute SHAP values using xgboost's predict function
+    shap_values <- xgboost::xgb.model.dt.tree(
+      feature_names = model$feature_names,
+      model = model,
+      input_data = dtest,
+      type = "contributions"
+    )
     
     # Take a sample of records to visualize (to avoid cluttered plots)
     set.seed(123)

@@ -494,34 +494,38 @@ extract_variable_importance <- function(model, top_n = 10, model_type = NULL) {
 }
 
 # Function to plot variable importance
-plot_variable_importance <- function(importance_df, title = "Variable Importance", 
-                                   max_vars = 20, color = "steelblue") {
-  # Check if ggplot2 is available
-  if(!requireNamespace("ggplot2", quietly = TRUE)) {
-    stop("ggplot2 package is required for this function")
+plot_variable_importance <- function(importance_df, title = "Feature Importance", max_vars = 20) {
+  # Ensure the input data frame has the correct structure
+  if (!all(c("Feature", "Gain") %in% colnames(importance_df))) {
+    stop("importance_df must have 'Feature' and 'Gain' columns")
   }
   
-  # Limit to max_vars if needed
-  if(nrow(importance_df) > max_vars) {
-    importance_df <- importance_df[1:max_vars, ]
+  # Ensure the data frame is not empty
+  if (nrow(importance_df) == 0) {
+    warning("Empty importance data frame - no plot generated")
+    return(NULL)
   }
   
-  # Reverse order for plotting (to have most important at the top)
-  importance_df$Variable <- factor(importance_df$Variable, 
-                                 levels = rev(importance_df$Variable))
+  # Sort by importance and take top max_vars
+  plot_df <- importance_df %>%
+    arrange(desc(Gain)) %>%
+    slice_head(n = max_vars)
   
   # Create the plot
-  p <- ggplot2::ggplot(importance_df, ggplot2::aes(x = Importance, y = Variable)) +
-    ggplot2::geom_bar(stat = "identity", fill = color) +
-    ggplot2::labs(title = title, x = "Importance", y = "") +
-    ggplot2::theme_minimal() +
-    ggplot2::theme(
-      axis.text.y = ggplot2::element_text(size = 10),
-      axis.title.x = ggplot2::element_text(size = 12),
-      plot.title = ggplot2::element_text(size = 14, hjust = 0.5)
+  ggplot(plot_df, aes(x = reorder(Feature, Gain), y = Gain)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() +
+    labs(
+      title = title,
+      x = "Features",
+      y = "Importance (Gain)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12)
     )
-  
-  return(p)
 }
 
 # Function to calculate lift and gain

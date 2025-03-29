@@ -41,4 +41,5 @@ WORKDIR /app
 COPY . /app/
 
 # Command to run when the container starts
-CMD ["R", "--vanilla", "-e", "source('scripts/05_analysis.R')"]
+#CMD ["R", "--vanilla", "-e", "source('scripts/05_analysis.R')"]
+CMD ["/bin/bash"]

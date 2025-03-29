@@ -43,43 +43,38 @@ prepare_for_random_forest <- function(train_data, test_data) {
   # Optional: Create additional features that might be useful
   # Random forests can handle many features without overfitting
   
-  # Calculate credit amount per month
-  if("duration" %in% names(train_rf) && "credit_amount" %in% names(train_rf)) {
-    message("Creating monthly payment feature...")
-    train_rf$monthly_payment <- train_rf$credit_amount / train_rf$duration
-    test_rf$monthly_payment <- test_rf$credit_amount / test_rf$duration
+  # Move feature engineering into a separate helper function
+  engineer_features <- function(data) {
+    # Calculate credit amount per month
+    if("duration" %in% names(data) && "credit_amount" %in% names(data)) {
+      data$monthly_payment <- data$credit_amount / data$duration
+      
+      # Handle potential Inf/NA values
+      data$monthly_payment[!is.finite(data$monthly_payment)] <- 
+        max(data$monthly_payment[is.finite(data$monthly_payment)], na.rm = TRUE)
+    }
     
-    # Handle potential Inf/NA values
-    train_rf$monthly_payment[!is.finite(train_rf$monthly_payment)] <- 
-      max(train_rf$monthly_payment[is.finite(train_rf$monthly_payment)], na.rm = TRUE)
-    test_rf$monthly_payment[!is.finite(test_rf$monthly_payment)] <- 
-      max(test_rf$monthly_payment[is.finite(test_rf$monthly_payment)], na.rm = TRUE)
+    # Age to employment ratio (stability indicator)
+    if("age" %in% names(data) && "employment" %in% names(data)) {
+      if(is.factor(data$employment)) {
+        employment_map <- c(
+          "A71" = 0.5,   # unemployed/unskilled - non-resident
+          "A72" = 1,     # unskilled - resident
+          "A73" = 2,     # skilled employee / official
+          "A74" = 5,     # management / self-employed / highly qualified employee / officer
+          "A75" = 7      # highest level
+        )
+        
+        data$employment_years <- employment_map[as.character(data$employment)]
+        data$age_employment_ratio <- data$age / (data$employment_years + 0.1)
+      }
+    }
+    return(data)
   }
   
-  # Age to employment ratio (stability indicator)
-  if("age" %in% names(train_rf) && "employment" %in% names(train_rf)) {
-    message("Creating age-employment feature...")
-    
-    # Convert employment factor to numeric if needed
-    if(is.factor(train_rf$employment)) {
-      # Assuming employment has ordered categories like "< 1 year", "1-4 years", etc.
-      # Map to numeric values
-      employment_map <- c(
-        "A71" = 0.5,   # unemployed/unskilled - non-resident
-        "A72" = 1,     # unskilled - resident
-        "A73" = 2,     # skilled employee / official
-        "A74" = 5,     # management / self-employed / highly qualified employee / officer
-        "A75" = 7      # highest level
-      )
-      
-      train_rf$employment_years <- employment_map[as.character(train_rf$employment)]
-      test_rf$employment_years <- employment_map[as.character(test_rf$employment)]
-      
-      # Now create the ratio
-      train_rf$age_employment_ratio <- train_rf$age / (train_rf$employment_years + 0.1)
-      test_rf$age_employment_ratio <- test_rf$age / (test_rf$employment_years + 0.1)
-    }
-  }
+  # Apply feature engineering to both datasets
+  train_rf <- engineer_features(train_rf)
+  test_rf <- engineer_features(test_rf)
   
   # Create a formula that includes all predictors except the class
   predictors <- setdiff(names(train_rf), "class")
@@ -91,7 +86,8 @@ prepare_for_random_forest <- function(train_data, test_data) {
   return(list(
     train = train_rf,
     test = test_rf,
-    formula = model_formula
+    formula = model_formula,
+    engineer_features = engineer_features  # Return the function for later use
   ))
 }
 
@@ -195,8 +191,13 @@ train_random_forest <- function(prepared_data, k_folds = 5, seed_value = 123) {
 }
 
 # Function to generate predictions using the trained model
-generate_predictions <- function(model, test_data) {
+generate_predictions <- function(model, test_data, prepared_data = NULL) {
   message("\n=== Generating Predictions ===")
+  
+  # Apply feature engineering if prepared_data is provided
+  if (!is.null(prepared_data) && !is.null(prepared_data$engineer_features)) {
+    test_data <- prepared_data$engineer_features(test_data)
+  }
   
   # Handle different model types
   if(inherits(model, "train")) {
@@ -238,7 +239,7 @@ generate_predictions <- function(model, test_data) {
 }
 
 # Function to evaluate model performance
-evaluate_random_forest <- function(predictions, actual, model, output_dir = "results/models/random_forest") {
+evaluate_random_forest <- function(predictions, actual, model, prepared_data = NULL, output_dir = "results/models/random_forest") {
   message("\n=== Evaluating Model Performance ===")
   
   # Create output directory if it doesn't exist
@@ -397,11 +398,21 @@ evaluate_random_forest <- function(predictions, actual, model, output_dir = "res
       dir.create(pdp_dir, recursive = TRUE)
     }
     
+    # Use the prepared test data if available, otherwise engineer features for test data
+    if (!is.null(prepared_data) && !is.null(prepared_data$test)) {
+      pdp_data <- prepared_data$test
+    } else if (!is.null(prepared_data) && !is.null(prepared_data$engineer_features)) {
+      pdp_data <- prepared_data$engineer_features(test_data)
+    } else {
+      pdp_data <- test_data  # Fallback to original test data if no preparation available
+    }
+    
     # Generate PDP plots for each top variable
     for(var in top_vars) {
       tryCatch({
-        # Skip if variable doesn't exist
-        if(!(var %in% names(test_data))) {
+        # Skip if variable doesn't exist in the prepared data
+        if(!(var %in% names(pdp_data))) {
+          message("Skipping PDP plot for variable ", var, ": variable not found in data")
           next
         }
         
@@ -409,7 +420,7 @@ evaluate_random_forest <- function(predictions, actual, model, output_dir = "res
         pdp_result <- pdp::partial(
           model, 
           pred.var = var, 
-          train = test_data,
+          train = pdp_data,  # Use prepared data
           prob = TRUE,
           plot = FALSE,
           which.class = 2  # For the positive class probability
@@ -504,10 +515,10 @@ run_random_forest <- function(train_data, test_data, k_folds = 5, seed_value = 1
   rf_model <- train_random_forest(prepared_data, k_folds, seed_value)
   
   # Step 3: Generate predictions
-  predictions <- generate_predictions(rf_model, test_data)
+  predictions <- generate_predictions(rf_model, test_data, prepared_data)
   
   # Step 4: Evaluate model performance
-  performance <- evaluate_random_forest(predictions, test_data$class, rf_model)
+  performance <- evaluate_random_forest(predictions, test_data$class, rf_model, prepared_data)
   
   message("\n====== Random Forest Workflow Complete ======\n")
   

@@ -1,0 +1,37 @@
+=== RANDOM FOREST MODEL SUMMARY ===
+
+Date:  2025-03-29 
+
+PERFORMANCE METRICS:
+Accuracy: 0.6633
+Precision: 0.8609
+Recall: 0.619
+F1: 0.7202
+Auc: 0.7712
+
+CONFUSION MATRIX:
+          Reference
+Prediction Bad Good
+      Bad   69   80
+      Good  21  130
+
+DETAILED STATISTICS:
+         Sensitivity          Specificity       Pos Pred Value       Neg Pred Value 
+           0.6190476            0.7666667            0.8609272            0.4630872 
+           Precision               Recall                   F1           Prevalence 
+           0.8609272            0.6190476            0.7202216            0.7000000 
+      Detection Rate Detection Prevalence    Balanced Accuracy 
+           0.4333333            0.5033333            0.6928571 
+
+MODEL PARAMETERS:
+Best mtry:  7 
+Number of Trees:  500 
+OOB Error Rate:  0.302381 
+
+TOP 10 VARIABLES BY IMPORTANCE:
+    checking_statusA14          credit_amount   age_employment_ratio        monthly_payment 
+             20.022621              18.214807              16.682973              16.222392 
+              duration                    age       employment_years installment_commitment 
+             16.085789              13.818301               6.244754               5.879985 
+       residence_since      savings_statusA65 
+              5.101179               4.459514 

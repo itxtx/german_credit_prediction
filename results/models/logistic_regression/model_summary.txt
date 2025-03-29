@@ -1,0 +1,24 @@
+=== LOGISTIC REGRESSION MODEL SUMMARY ===
+
+Date:  2025-03-29 
+
+PERFORMANCE METRICS:
+Accuracy: 0.66
+Precision: 0.8418
+Recall: 0.6333
+F1: 0.7228
+Auc: 0.7575
+
+CONFUSION MATRIX:
+          Reference
+Prediction Bad Good
+      Bad   65   77
+      Good  25  133
+
+DETAILED STATISTICS:
+         Sensitivity          Specificity       Pos Pred Value       Neg Pred Value 
+           0.6333333            0.7222222            0.8417722            0.4577465 
+           Precision               Recall                   F1           Prevalence 
+           0.8417722            0.6333333            0.7228261            0.7000000 
+      Detection Rate Detection Prevalence    Balanced Accuracy 
+           0.4433333            0.5266667            0.6777778 

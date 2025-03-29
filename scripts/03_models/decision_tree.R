@@ -15,156 +15,74 @@ if(!exists("train_data") || !exists("test_data")) {
   source("scripts/02_data_preprocessing.R")
 }
 
-# Function to prepare data specifically for decision trees
+# Add this new function near the top of the file
+engineer_features <- function(data) {
+  data_prepared <- data
+  
+  # Create duration-to-amount ratio
+  if("duration" %in% names(data) && "credit_amount" %in% names(data)) {
+    message("Creating duration-to-amount ratio feature...")
+    data_prepared$duration_to_amount <- data$duration / (data$credit_amount + 1)
+  }
+  
+  # Create age categories
+  if("age" %in% names(data)) {
+    message("Creating age category feature...")
+    data_prepared$age_cat <- cut(data$age,
+                                breaks = c(0, 25, 40, 60, 100),
+                                labels = c("Young", "Adult", "Middle", "Senior"))
+  }
+  
+  return(data_prepared)
+}
+
+# Simplify prepare_for_decision_tree function
 prepare_for_decision_tree <- function(train_data, test_data) {
   message("\n=== Preparing Data for Decision Tree ===")
   
-  # Create copies to avoid modifying the originals
+  # Create copies
   train_dt <- train_data
   test_dt <- test_data
   
-  # For decision trees:
-  # 1. No need to standardize numeric variables
-  # 2. No need for one-hot encoding of categorical variables
-  # 3. No special handling for outliers (trees are robust to them)
-  # 4. Might want to create interaction features (optional)
-  
-  # Handle factor levels to ensure consistency
-  factor_cols <- names(train_dt)[sapply(train_dt, is.factor)]
-  for(col in factor_cols) {
-    # Get all levels from both datasets
-    all_levels <- unique(c(levels(train_dt[[col]]), levels(test_dt[[col]])))
-    
-    # Set the levels for both datasets
-    levels(train_dt[[col]]) <- all_levels
-    levels(test_dt[[col]]) <- all_levels
+  # Simple imputation for both train and test
+  for(col in names(train_dt)) {
+    if(is.numeric(train_dt[[col]])) {
+      # For numeric columns, replace NA with mean from training data
+      col_mean <- mean(train_dt[[col]], na.rm = TRUE)
+      train_dt[[col]][is.na(train_dt[[col]])] <- col_mean
+      test_dt[[col]][is.na(test_dt[[col]])] <- col_mean
+    } else if(is.factor(train_dt[[col]])) {
+      # For factor columns, replace NA with mode from training data
+      mode_val <- names(sort(table(train_dt[[col]], na.rm = TRUE), decreasing = TRUE))[1]
+      train_dt[[col]][is.na(train_dt[[col]])] <- mode_val
+      test_dt[[col]][is.na(test_dt[[col]])] <- mode_val
+    }
   }
   
-  # Decision trees can benefit from creating interaction features, especially
-  # between key variables. For example:
-  if("duration" %in% names(train_dt) && "credit_amount" %in% names(train_dt)) {
-    message("Creating duration-to-amount ratio feature...")
-    train_dt$duration_to_amount <- train_dt$duration / (train_dt$credit_amount + 1)  # Add 1 to avoid division by zero
-    test_dt$duration_to_amount <- test_dt$duration / (test_dt$credit_amount + 1)
-  }
-  
-  # Age categories might be more informative than continuous age
-  if("age" %in% names(train_dt)) {
-    message("Creating age category feature...")
-    train_dt$age_cat <- cut(train_dt$age,
-                           breaks = c(0, 25, 40, 60, 100),
-                           labels = c("Young", "Adult", "Middle", "Senior"))
-    test_dt$age_cat <- cut(test_dt$age,
-                          breaks = c(0, 25, 40, 60, 100),
-                          labels = c("Young", "Adult", "Middle", "Senior"))
-  }
-  
-  # Create a formula that includes all predictors except the class
+  # Create simple formula
   predictors <- setdiff(names(train_dt), "class")
   formula_string <- paste("class ~", paste(predictors, collapse = " + "))
-  model_formula <- as.formula(formula_string)
-  
-  message("Created model formula with ", length(predictors), " predictors")
   
   return(list(
     train = train_dt,
     test = test_dt,
-    formula = model_formula
+    formula = as.formula(formula_string)
   ))
 }
 
-# Function to train decision tree model with cross-validation
+# Simplify train_decision_tree function
 train_decision_tree <- function(prepared_data, k_folds = 5, seed_value = 123) {
-  message("\n=== Training Decision Tree Model with Cross-Validation ===")
-  
-  # Set seed for reproducibility
+  message("\n=== Training Decision Tree Model ===")
   set.seed(seed_value)
   
-  # Extract prepared data
-  train_data <- prepared_data$train
-  model_formula <- prepared_data$formula
-  
-  # Set up cross-validation
-  ctrl <- trainControl(
-    method = "cv",            # Cross-validation
-    number = k_folds,         # Number of folds
-    classProbs = TRUE,        # Calculate class probabilities
-    summaryFunction = twoClassSummary,  # Use ROC summary
-    savePredictions = "final" # Save final predictions
+  # Create simple rpart model
+  model <- rpart::rpart(
+    formula = prepared_data$formula,
+    data = prepared_data$train,
+    method = "class"
   )
   
-  # Set tuning grid for cp (complexity parameter)
-  tuning_grid <- expand.grid(
-    cp = seq(0.001, 0.05, by = 0.005)  # Try 10 different cp values
-  )
-  
-  # Train the model with error handling
-  tryCatch({
-    message("Training decision tree model...")
-    
-    # Start timing
-    start_time <- proc.time()
-    
-    # Check if required packages are available
-    if(!requireNamespace("rpart", quietly = TRUE)) {
-      message("Installing rpart package...")
-      install.packages("rpart", repos = "https://cloud.r-project.org")
-    }
-    
-    # Train the model with cross-validation and parameter tuning
-    tree_model <- train(
-      model_formula, 
-      data = train_data,
-      method = "rpart",
-      trControl = ctrl,
-      tuneGrid = tuning_grid,
-      metric = "ROC"
-    )
-    
-    # End timing
-    end_time <- proc.time()
-    train_time <- end_time - start_time
-    
-    message("Model training completed in ", round(train_time[3], 2), " seconds")
-    
-    # Print model summary
-    message("\nModel Summary:")
-    print(tree_model)
-    
-    # Print cross-validation results
-    message("\nCross-Validation Results:")
-    print(tree_model$results)
-    
-    # Print best tuning parameters
-    message("\nBest Tuning Parameters:")
-    print(tree_model$bestTune)
-    
-    # Get variable importance
-    if(requireNamespace("rpart", quietly = TRUE)) {
-      message("\nVariable Importance:")
-      var_imp <- rpart::rpart.object.size(tree_model$finalModel)
-      print(sort(tree_model$finalModel$variable.importance, decreasing = TRUE))
-    }
-    
-    return(tree_model)
-    
-  }, error = function(e) {
-    message("ERROR training decision tree: ", e$message)
-    
-    # Try with a simpler approach if the original fails
-    message("Attempting with a simplified model...")
-    
-    # Create a simpler model with minimal settings
-    simple_model <- rpart::rpart(
-      formula = model_formula,
-      data = train_data,
-      method = "class",
-      control = rpart::rpart.control(cp = 0.01)
-    )
-    
-    message("Simplified model training completed")
-    return(simple_model)
-  })
+  return(model)
 }
 
 # Function to visualize the decision tree
@@ -219,49 +137,19 @@ plot_decision_tree <- function(model, output_dir = "results/models/decision_tree
   return(TRUE)
 }
 
-# Function to generate predictions using the trained model
-generate_predictions <- function(model, test_data) {
+# Simplify generate_predictions function
+generate_predictions <- function(model, prepared_test_data) {
   message("\n=== Generating Predictions ===")
   
-  # Handle different model types
-  if(inherits(model, "train")) {
-    # Caret's train object
-    # Generate class predictions
-    pred_class <- predict(model, newdata = test_data)
-    
-    # Generate probability predictions
-    pred_prob <- predict(model, newdata = test_data, type = "prob")
-  } else if(inherits(model, "rpart")) {
-    # Direct rpart object
-    # Generate class predictions
-    pred_class <- predict(model, newdata = test_data, type = "class")
-    
-    # Generate probability predictions
-    pred_prob_matrix <- predict(model, newdata = test_data, type = "prob")
-    # Create a data frame with appropriate column names
-    pred_prob <- data.frame(pred_prob_matrix)
-    if(ncol(pred_prob) == 2) {
-      colnames(pred_prob) <- c("Bad", "Good")
-    }
-  } else {
-    stop("Unknown model type. Cannot generate predictions.")
-  }
-  
-  # Extract probability for the positive class (assuming "Good" is positive)
-  if("Good" %in% colnames(pred_prob)) {
-    pos_class_prob <- pred_prob[, "Good"]
-  } else {
-    # If "Good" not found, use second column (typically the positive class in binary)
-    pos_class_prob <- pred_prob[, 2]
-    message("Used second probability column as positive class")
-  }
+  # Generate predictions
+  pred_class <- predict(model, newdata = prepared_test_data, type = "class")
+  pred_prob <- predict(model, newdata = prepared_test_data, type = "prob")
   
   message("Generated predictions for ", length(pred_class), " test samples")
   
   return(list(
     class = pred_class,
-    prob = pos_class_prob,
-    all_probs = pred_prob
+    prob = pred_prob[, "Good"]
   ))
 }
 
@@ -269,19 +157,47 @@ generate_predictions <- function(model, test_data) {
 evaluate_decision_tree <- function(predictions, actual, model, output_dir = "results/models/decision_tree") {
   message("\n=== Evaluating Model Performance ===")
   
+  # Add input validation and debugging
+  message("Checking input data dimensions:")
+  message("Length of predictions: ", length(predictions$class))
+  message("Length of actual values: ", length(actual))
+  
+  # Ensure predictions and actual values are factors with the same levels
+  pred_class <- factor(predictions$class, levels = c("Bad", "Good"))
+  actual_class <- factor(actual, levels = c("Bad", "Good"))
+  
+  # Verify probability predictions
+  if(is.null(predictions$prob) || length(predictions$prob) != length(actual)) {
+    message("WARNING: Issue with probability predictions. Length of probabilities: ", 
+            length(predictions$prob))
+  }
+  
   # Create output directory if it doesn't exist
   if(!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
     message("Created directory: ", output_dir)
   }
   
-  # Evaluate model using the evaluation.R utility
-  performance <- evaluate_model(
-    pred = predictions$class,
-    actual = actual,
-    pred_prob = predictions$prob,
-    positive_class = "Good"
-  )
+  # Evaluate model using the evaluation.R utility with error handling
+  tryCatch({
+    performance <- evaluate_model(
+      pred = pred_class,
+      actual = actual_class,
+      pred_prob = predictions$prob,
+      positive_class = "Good"
+    )
+  }, error = function(e) {
+    message("Error in evaluate_model: ", e$message)
+    # Return a minimal performance object if evaluation fails
+    return(list(
+      accuracy = NA,
+      precision = NA,
+      recall = NA,
+      f1 = NA,
+      auc = NA,
+      confusion_matrix = table(Predicted = pred_class, Actual = actual_class)
+    ))
+  })
   
   # Print performance metrics
   message("\nPerformance Metrics:")
@@ -417,28 +333,22 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
   return(performance)
 }
 
-# Main function to run the entire decision tree workflow
-run_decision_tree <- function(train_data, test_data, k_folds = 5, seed_value = 123) {
+# Simplify main workflow
+run_decision_tree <- function(train_data, test_data) {
   message("\n====== Running Decision Tree Workflow ======\n")
   
-  # Step 1: Prepare data for decision tree
+  # Prepare data
   prepared_data <- prepare_for_decision_tree(train_data, test_data)
   
-  # Step 2: Train decision tree model
-  tree_model <- train_decision_tree(prepared_data, k_folds, seed_value)
+  # Train model
+  tree_model <- train_decision_tree(prepared_data)
   
-  # Step 3: Visualize the decision tree
-  plot_decision_tree(tree_model)
+  # Generate predictions using prepared test data
+  predictions <- generate_predictions(tree_model, prepared_data$test)
   
-  # Step 4: Generate predictions
-  predictions <- generate_predictions(tree_model, test_data)
-  
-  # Step 5: Evaluate model performance
+  # Evaluate model
   performance <- evaluate_decision_tree(predictions, test_data$class, tree_model)
   
-  message("\n====== Decision Tree Workflow Complete ======\n")
-  
-  # Return model and performance metrics
   return(list(
     model = tree_model,
     predictions = predictions,
@@ -454,10 +364,10 @@ if(!exists("DECISION_TREE_SOURCED") || !DECISION_TREE_SOURCED) {
   }
   
   # Run decision tree
-  tree_results <- run_decision_tree(train_data, test_data)
+  results <- run_decision_tree(train_data, test_data)
   
   # Save model for later use
-  saveRDS(tree_results$model, "results/models/decision_tree/decision_tree_model.rds")
+  saveRDS(results$model, "results/models/decision_tree/decision_tree_model.rds")
   
   DECISION_TREE_SOURCED <- TRUE
 } else {

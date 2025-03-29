@@ -1,0 +1,49 @@
+=== XGBOOST MODEL SUMMARY ===
+
+Date:  2025-03-29 
+
+PERFORMANCE METRICS:
+Accuracy: 0.6333
+Precision: 0.8205
+Recall: 0.6095
+F1: 0.6995
+Auc: 0.7384
+
+CONFUSION MATRIX:
+          Reference
+Prediction Bad Good
+      Bad   62   82
+      Good  28  128
+
+DETAILED STATISTICS:
+         Sensitivity          Specificity       Pos Pred Value       Neg Pred Value 
+           0.6095238            0.6888889            0.8205128            0.4305556 
+           Precision               Recall                   F1           Prevalence 
+           0.8205128            0.6095238            0.6994536            0.7000000 
+      Detection Rate Detection Prevalence    Balanced Accuracy 
+           0.4266667            0.5200000            0.6492063 
+
+MODEL PARAMETERS:
+objective :  binary:logistic 
+eval_metric :  auc 
+eta :  0.01 
+max_depth :  6 
+min_child_weight :  3 
+subsample :  0.8 
+colsample_bytree :  0.6 
+scale_pos_weight :  1 
+nrounds:  34 
+
+TOP 10 FEATURES BY IMPORTANCE (GAIN):
+                    Feature       Gain      Cover  Frequency
+                     <char>      <num>      <num>      <num>
+ 1:      checking_statusA14 0.34491274 0.15357581 0.05021834
+ 2:                duration 0.16151534 0.15860216 0.14410480
+ 3:      checking_statusA11 0.05920139 0.06961665 0.04148472
+ 4:                     age 0.05397963 0.07436207 0.13100437
+ 5:           credit_amount 0.04817967 0.06407321 0.07860262
+ 6:      checking_statusA12 0.03783899 0.02570842 0.02401747
+ 7:       credit_historyA34 0.03036622 0.04757731 0.03711790
+ 8:      personal_statusA93 0.02800073 0.03079999 0.05021834
+ 9: other_payment_plansA141 0.02552874 0.02160551 0.01746725
+10:  installment_commitment 0.02004454 0.03360965 0.05021834
