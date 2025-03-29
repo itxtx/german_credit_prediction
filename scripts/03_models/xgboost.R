@@ -12,72 +12,90 @@ source("scripts/utils/evaluation.R")
 
 # Load preprocessed data if not already in environment
 if(!exists("train_data") || !exists("test_data")) {
-  source("scripts/02_data_preprocessing.R")
+  message("Loading data from CSV files...")
+  train_data <- read.csv("data/processed/train_data.csv", stringsAsFactors = TRUE)
+  test_data <- read.csv("data/processed/test_data.csv", stringsAsFactors = TRUE)
+  
+  # Ensure class is a factor
+  train_data$class <- factor(train_data$class, levels = c("Bad", "Good"))
+  test_data$class <- factor(test_data$class, levels = c("Bad", "Good"))
 }
 
 library(xgboost)
 library(caret)
 
 # Function to prepare data specifically for XGBoost
-prepare_for_xgboost <- function(train_data, test_data) {
+prepare_for_xgboost <- function(train_data = NULL, test_data) {
   message("\n=== Preparing Data for XGBoost ===")
   
-  # Create copies to avoid modifying the originals
-  train_xgb <- train_data
+  # Create copy of test data to avoid modifying the original
   test_xgb <- test_data
   
-  # For XGBoost, we need:
-  # 1. Convert categorical variables to numeric (one-hot encoding)
-  # 2. Convert target to 0/1 numeric format
-  # 3. Create DMatrix objects
-  
-  # Step 1: Identify categorical variables and perform one-hot encoding
-  factor_cols <- names(train_xgb)[sapply(train_xgb, is.factor)]
-  factor_cols <- setdiff(factor_cols, "class")  # Exclude target variable
-  
-  message("One-hot encoding ", length(factor_cols), " categorical variables...")
-  
-  # Create dummy variables for each categorical column
-  for(col in factor_cols) {
-    # Create dummy variables using model.matrix
-    train_dummies <- model.matrix(~ 0 + get(col), data = train_xgb)
-    test_dummies <- model.matrix(~ 0 + get(col), data = test_xgb)
+  # If train_data is provided, use it for one-hot encoding reference
+  if (!is.null(train_data)) {
+    train_xgb <- train_data
+    # Identify categorical variables from training data
+    factor_cols <- names(train_xgb)[sapply(train_xgb, is.factor)]
+    factor_cols <- setdiff(factor_cols, "class")  # Exclude target variable
     
-    # Fix column names (remove "get(col)" prefix)
-    colnames(train_dummies) <- gsub("^get\\(col\\)", col, colnames(train_dummies))
-    colnames(test_dummies) <- gsub("^get\\(col\\)", col, colnames(test_dummies))
+    message("One-hot encoding ", length(factor_cols), " categorical variables...")
     
-    # Add to datasets
-    train_xgb <- cbind(train_xgb, train_dummies)
-    test_xgb <- cbind(test_xgb, test_dummies)
+    # Process both train and test data
+    for(col in factor_cols) {
+      # Create dummy variables using model.matrix
+      train_dummies <- model.matrix(~ 0 + get(col), data = train_xgb)
+      test_dummies <- model.matrix(~ 0 + get(col), data = test_xgb)
+      
+      # Fix column names
+      colnames(train_dummies) <- gsub("^get\\(col\\)", col, colnames(train_dummies))
+      colnames(test_dummies) <- gsub("^get\\(col\\)", col, colnames(test_dummies))
+      
+      # Add to datasets
+      train_xgb <- cbind(train_xgb, train_dummies)
+      test_xgb <- cbind(test_xgb, test_dummies)
+      
+      # Remove original categorical column
+      train_xgb[[col]] <- NULL
+      test_xgb[[col]] <- NULL
+    }
     
-    # Remove original categorical column
-    train_xgb[[col]] <- NULL
-    test_xgb[[col]] <- NULL
+    # Process training data
+    train_xgb$target <- as.numeric(train_xgb$class == "Good")
+    train_xgb$class <- NULL
+    
+    features <- setdiff(names(train_xgb), "target")
+    train_matrix <- as.matrix(train_xgb[, features])
+    train_label <- train_xgb$target
+  } else {
+    # If no training data, process test data independently
+    factor_cols <- names(test_xgb)[sapply(test_xgb, is.factor)]
+    factor_cols <- setdiff(factor_cols, "class")
+    
+    for(col in factor_cols) {
+      test_dummies <- model.matrix(~ 0 + get(col), data = test_xgb)
+      colnames(test_dummies) <- gsub("^get\\(col\\)", col, colnames(test_dummies))
+      test_xgb <- cbind(test_xgb, test_dummies)
+      test_xgb[[col]] <- NULL
+    }
+    
+    train_matrix <- NULL
+    train_label <- NULL
+    features <- setdiff(names(test_xgb), "class")
   }
   
-  # Step 2: Convert target to 0/1 format
-  # For XGBoost, the positive class is labeled as 1
-  train_xgb$target <- as.numeric(train_xgb$class == "Good")
+  # Process test data
   test_xgb$target <- as.numeric(test_xgb$class == "Good")
-  
-  # Remove original class column
-  train_xgb$class <- NULL
   test_xgb$class <- NULL
   
-  # Step 3: Create feature matrices and label vectors
-  features <- setdiff(names(train_xgb), "target")
-  
-  # Create matrices
-  train_matrix <- as.matrix(train_xgb[, features])
   test_matrix <- as.matrix(test_xgb[, features])
-  
-  train_label <- train_xgb$target
   test_label <- test_xgb$target
   
-  message("Data preparation completed: ", ncol(train_matrix), " features after one-hot encoding")
+  # Ensure all matrices are numeric
+  if (!is.null(train_matrix)) storage.mode(train_matrix) <- "numeric"
+  storage.mode(test_matrix) <- "numeric"
   
-  # Return prepared data
+  message("Data preparation completed: ", ncol(test_matrix), " features after one-hot encoding")
+  
   return(list(
     train_matrix = train_matrix,
     test_matrix = test_matrix,
@@ -88,194 +106,108 @@ prepare_for_xgboost <- function(train_data, test_data) {
 }
 
 # Function to train XGBoost model with cross-validation
-train_xgboost_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
-  message("\n=== Training XGBoost Model with Cross-Validation ===")
+train_xgboost_model <- function(train_data, target_col = "class") {
+  message("\n=== Training XGBoost Model ===")
   
-  # Set seed for reproducibility
-  set.seed(seed_value)
+  # Create a copy of the data to avoid modifying the original
+  data <- train_data
   
-  # Extract prepared data
-  train_matrix <- prepared_data$train_matrix
-  train_label <- prepared_data$train_label
+  # Convert target to numeric (0/1)
+  y <- as.numeric(data[[target_col]] == "Good")
   
-  # Check if xgboost package is available
-  if(!requireNamespace("xgboost", quietly = TRUE)) {
-    message("XGBoost package not found. Attempting to install...")
+  # Remove target column from features
+  X <- data[, !names(data) %in% target_col, drop = FALSE]
+  
+  # Identify numeric and factor columns
+  factor_cols <- names(X)[sapply(X, is.factor)]
+  numeric_cols <- names(X)[sapply(X, is.numeric)]
+  
+  # Create dummy variables for factor columns
+  if(length(factor_cols) > 0) {
+    # Create model matrix for categorical variables
+    factor_matrix <- model.matrix(~ . - 1, data = X[, factor_cols, drop = FALSE])
     
-    # Try to install and load xgboost
-    xgboost_available <- resolve_xgboost_issues()
-    
-    if(!xgboost_available) {
-      stop("Failed to install XGBoost. Cannot continue with XGBoost model.")
+    # If there are numeric columns, combine them with the dummy variables
+    if(length(numeric_cols) > 0) {
+      X_processed <- cbind(as.matrix(X[, numeric_cols, drop = FALSE]), factor_matrix)
+    } else {
+      X_processed <- factor_matrix
     }
+  } else {
+    # If no factor columns, just convert numeric columns to matrix
+    X_processed <- as.matrix(X[, numeric_cols, drop = FALSE])
   }
   
-  # Load xgboost
-  library(xgboost)
+  # Ensure all data is numeric
+  storage.mode(X_processed) <- "numeric"
   
-  # Create DMatrix objects for XGBoost
-  dtrain <- xgb.DMatrix(data = train_matrix, label = train_label)
+  # Create DMatrix
+  dtrain <- xgb.DMatrix(data = X_processed, label = y)
   
-  # Set XGBoost parameters
+  # Set parameters
   params <- list(
-    objective = "binary:logistic",   # Binary classification with logistic regression
-    eval_metric = "auc",             # AUC for evaluation
-    booster = "gbtree",              # Tree-based model
-    eta = 0.1,                       # Learning rate
-    max_depth = 6,                   # Maximum tree depth
-    min_child_weight = 1,            # Minimum sum of instance weight needed in a child
-    subsample = 0.8,                 # Subsample ratio of the training instances
-    colsample_bytree = 0.8,          # Subsample ratio of columns when constructing each tree
-    scale_pos_weight = sum(train_label == 0) / sum(train_label == 1)  # Handle class imbalance
+    objective = "binary:logistic",
+    eval_metric = "auc",
+    eta = 0.1,
+    max_depth = 6,
+    subsample = 0.8,
+    colsample_bytree = 0.8
   )
   
-  # Define parameter grid for cross-validation
-  param_grid <- expand.grid(
-    eta = c(0.01, 0.05, 0.1),
-    max_depth = c(3, 6, 9),
-    min_child_weight = c(1, 3, 5),
-    subsample = c(0.6, 0.8, 1.0),
-    colsample_bytree = c(0.6, 0.8, 1.0),
-    nrounds = c(100, 200, 300)
+  # Train model
+  model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    verbose = 0
   )
   
-  # Limit to a smaller subset of combinations for reasonable training time
-  set.seed(seed_value)
-  param_grid <- param_grid[sample(nrow(param_grid), min(nrow(param_grid), 5)), ]
+  # Store feature names in the model for later use
+  model$feature_names <- colnames(X_processed)
   
-  message("Performing cross-validation with ", nrow(param_grid), " parameter combinations...")
-  
-  # Train the model with error handling
-  tryCatch({
-    # Start timing
-    start_time <- proc.time()
-    
-    # Initialize variables to track best model
-    best_score <- 0
-    best_params <- NULL
-    best_nrounds <- 0
-    
-    # Perform simplified grid search with cross-validation
-    for(i in 1:nrow(param_grid)) {
-      # Get current parameter set
-      current_params <- list(
-        objective = "binary:logistic",
-        eval_metric = "auc",
-        eta = param_grid$eta[i],
-        max_depth = param_grid$max_depth[i],
-        min_child_weight = param_grid$min_child_weight[i],
-        subsample = param_grid$subsample[i],
-        colsample_bytree = param_grid$colsample_bytree[i],
-        scale_pos_weight = sum(train_label == 0) / sum(train_label == 1)
-      )
-      
-      # Perform cross-validation
-      cv_result <- xgb.cv(
-        params = current_params,
-        data = dtrain,
-        nrounds = param_grid$nrounds[i],
-        nfold = k_folds,
-        early_stopping_rounds = 10,
-        verbose = 0,
-        stratified = TRUE
-      )
-      
-      # Extract best score and iteration
-      best_iteration <- which.max(cv_result$evaluation_log$test_auc_mean)
-      best_iteration_score <- cv_result$evaluation_log$test_auc_mean[best_iteration]
-      
-      message("Params ", i, "/", nrow(param_grid), " - AUC: ", 
-              round(best_iteration_score, 4), 
-              " at iteration ", best_iteration)
-      
-      # Update best params if current is better
-      if(best_iteration_score > best_score) {
-        best_score <- best_iteration_score
-        best_params <- current_params
-        best_nrounds <- best_iteration
-      }
-    }
-    
-    message("Best parameters found - AUC: ", round(best_score, 4))
-    message("Best hyperparameters: ")
-    print(best_params)
-    message("Best number of rounds: ", best_nrounds)
-    
-    # Train final model with best parameters
-    final_model <- xgboost(
-      params = best_params,
-      data = dtrain,
-      nrounds = best_nrounds,
-      verbose = 0
-    )
-    
-    # End timing
-    end_time <- proc.time()
-    train_time <- end_time - start_time
-    
-    message("Model training completed in ", round(train_time[3], 2), " seconds")
-    
-    # Get feature importance
-    importance <- xgb.importance(feature_names = prepared_data$features, model = final_model)
-    message("\nTop 10 features by importance:")
-    print(head(importance, 10))
-    
-    # Add best parameters and metrics to model
-    final_model$best_params <- best_params
-    final_model$best_nrounds <- best_nrounds
-    final_model$best_score <- best_score
-    final_model$feature_names <- prepared_data$features
-    
-    return(final_model)
-    
-  }, error = function(e) {
-    message("ERROR training XGBoost: ", e$message)
-    
-    # Try with a simpler approach if the original fails
-    message("Attempting with a simplified model...")
-    
-    # Simple parameters
-    simple_params <- list(
-      objective = "binary:logistic",
-      eval_metric = "auc",
-      eta = 0.1,
-      max_depth = 3,
-      min_child_weight = 1
-    )
-    
-    # Train simple model
-    simple_model <- xgboost(
-      params = simple_params,
-      data = dtrain,
-      nrounds = 100,
-      verbose = 0
-    )
-    
-    message("Simplified model training completed")
-    
-    # Add parameters to model
-    simple_model$best_params <- simple_params
-    simple_model$best_nrounds <- 100
-    simple_model$feature_names <- prepared_data$features
-    
-    return(simple_model)
-  })
+  return(model)
 }
 
 # Function to generate predictions using the trained model
 generate_predictions <- function(model, test_data) {
-  # Prepare test data
-  test_prepared <- prepare_for_xgboost(test_data)
+  message("\n=== Generating Predictions ===")
   
-  # Generate predictions
-  pred_prob <- predict(model, test_prepared$data)
-  pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")
+  # Prepare test data - we pass NULL as train_data since we only need test predictions
+  test_prepared <- prepare_for_xgboost(NULL, test_data)
   
-  return(list(
-    class = pred_class,
-    prob = pred_prob,
-    all_probs = data.frame(Bad = 1 - pred_prob, Good = pred_prob)
-  ))
+  # Ensure feature names match
+  if (!is.null(model$feature_names)) {
+    # Get the column order from the model
+    model_features <- model$feature_names
+    
+    # Check if all required features exist
+    missing_features <- setdiff(model_features, colnames(test_prepared$test_matrix))
+    if (length(missing_features) > 0) {
+      stop("Missing features in test data: ", paste(missing_features, collapse = ", "))
+    }
+    
+    # Reorder columns to match model's feature order
+    test_matrix <- test_prepared$test_matrix[, model_features, drop = FALSE]
+  } else {
+    test_matrix <- test_prepared$test_matrix
+  }
+  
+  # Generate predictions using the test matrix
+  tryCatch({
+    pred_prob <- predict(model, test_matrix)
+    pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")
+    
+    return(list(
+      class = pred_class,
+      prob = pred_prob,
+      all_probs = data.frame(Bad = 1 - pred_prob, Good = pred_prob)
+    ))
+  }, error = function(e) {
+    message("Error details:")
+    message("Model features: ", paste(model$feature_names, collapse = ", "))
+    message("Test data features: ", paste(colnames(test_matrix), collapse = ", "))
+    stop("Prediction error: ", e$message)
+  })
 }
 
 # Function to evaluate model performance
@@ -537,7 +469,7 @@ run_xgboost <- function(train_data, test_data, k_folds = 5, seed_value = 123) {
   prepared_data <- prepare_for_xgboost(train_data, test_data)
   
   # Step 2: Train XGBoost model
-  xgb_model <- train_xgboost_model(prepared_data, k_folds, seed_value)
+  xgb_model <- train_xgboost_model(train_data)
   
   # Step 3: Generate predictions
   predictions <- generate_predictions(xgb_model, test_data)

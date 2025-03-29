@@ -549,9 +549,74 @@ preprocess_german_credit <- function(data, class_to_binary = TRUE, balance_class
   ))
 }
 
+# Add this function to preserve feature names
+prepare_model_data <- function(data, model_type) {
+  # Create a copy to avoid modifying original data
+  processed_data <- data
+  
+  # Ensure all expected columns exist
+  expected_columns <- c(
+    "checking_status", "duration", "credit_history", "purpose",
+    "credit_amount", "savings_status", "employment", 
+    "installment_commitment", "personal_status", "other_parties",
+    "residence_since", "property_magnitude", "age", 
+    "other_payment_plans", "housing", "existing_credits",
+    "job", "num_dependents", "own_telephone"
+  )
+  
+  missing_cols <- setdiff(expected_columns, names(processed_data))
+  if(length(missing_cols) > 0) {
+    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+  }
+  
+  # Convert categorical variables to factors if they aren't already
+  categorical_cols <- c(
+    "checking_status", "credit_history", "purpose", "savings_status",
+    "employment", "personal_status", "other_parties", "property_magnitude",
+    "other_payment_plans", "housing", "job", "own_telephone"
+  )
+  
+  processed_data[categorical_cols] <- lapply(processed_data[categorical_cols], as.factor)
+  
+  # Add derived features if needed
+  if(model_type %in% c("random_forest", "xgboost")) {
+    processed_data$age_employment_ratio <- processed_data$age / 
+      as.numeric(processed_data$employment)
+    processed_data$monthly_payment <- processed_data$credit_amount / 
+      processed_data$duration
+    processed_data$employment_years <- as.numeric(processed_data$employment)
+  }
+  
+  return(processed_data)
+}
+
 # If this script is run directly, demonstrate functionality
 if(!exists("PREPROCESSING_SOURCED") || !PREPROCESSING_SOURCED) {
   message("This script contains preprocessing functions for the German Credit Analysis project.")
   message("Source this script in your main analysis code to use these functions.")
   PREPROCESSING_SOURCED <- TRUE
+}
+
+validate_model_data <- function(data, required_features) {
+  missing_features <- setdiff(required_features, names(data))
+  if(length(missing_features) > 0) {
+    stop("Missing required features: ", paste(missing_features, collapse = ", "))
+  }
+  
+  # Validate data types
+  for(col in names(data)) {
+    if(is.factor(data[[col]])) {
+      if(any(is.na(data[[col]]))) {
+        warning("NA values found in factor column: ", col)
+      }
+    }
+  }
+  
+  return(TRUE)
+}
+
+# Function to prepare data for model training/prediction
+prepare_data <- function(data, model_type) {
+  # This is just an alias for prepare_model_data to maintain compatibility
+  return(prepare_model_data(data, model_type))
 }

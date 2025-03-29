@@ -10,10 +10,47 @@
 source("scripts/utils/setup.R")
 source("scripts/utils/evaluation.R")
 
-# Load preprocessed data if not already in environment
-if(!exists("train_data") || !exists("test_data")) {
-  source("scripts/02_data_preprocessing.R")
+# Load and validate data
+load_and_validate_data <- function() {
+  message("Loading and validating data...")
+  
+  # Try to load data from CSV if not in environment
+  if(!exists("train_data") || !exists("test_data")) {
+    message("Loading data from CSV files...")
+    train_data <- read.csv("data/processed/train_data.csv", stringsAsFactors = TRUE)
+    test_data <- read.csv("data/processed/test_data.csv", stringsAsFactors = TRUE)
+    
+    # Validate required columns
+    required_columns <- c("checking_status", "class")
+    missing_columns <- required_columns[!required_columns %in% names(train_data)]
+    
+    if(length(missing_columns) > 0) {
+      stop("Missing required columns in training data: ", 
+           paste(missing_columns, collapse = ", "))
+    }
+    
+    missing_columns <- required_columns[!required_columns %in% names(test_data)]
+    if(length(missing_columns) > 0) {
+      stop("Missing required columns in test data: ", 
+           paste(missing_columns, collapse = ", "))
+    }
+    
+    message("Data loaded successfully")
+    message("Training data dimensions: ", paste(dim(train_data), collapse = " x "))
+    message("Test data dimensions: ", paste(dim(test_data), collapse = " x "))
+    
+    # Return the loaded data
+    return(list(train_data = train_data, test_data = test_data))
+  } else {
+    message("Using existing data from environment")
+    return(list(train_data = train_data, test_data = test_data))
+  }
 }
+
+# Replace the existing data loading check with:
+data_list <- load_and_validate_data()
+train_data <- data_list$train_data
+test_data <- data_list$test_data
 
 # Add this new function near the top of the file
 engineer_features <- function(data) {
@@ -39,6 +76,16 @@ engineer_features <- function(data) {
 # Simplify prepare_for_decision_tree function
 prepare_for_decision_tree <- function(train_data, test_data) {
   message("\n=== Preparing Data for Decision Tree ===")
+  
+  # Validate that all columns in train_data exist in test_data
+  train_cols <- names(train_data)
+  test_cols <- names(test_data)
+  missing_cols <- setdiff(train_cols, test_cols)
+  
+  if(length(missing_cols) > 0) {
+    stop("Test data is missing columns that exist in training data: ",
+         paste(missing_cols, collapse = ", "))
+  }
   
   # Create copies
   train_dt <- train_data
@@ -138,20 +185,39 @@ plot_decision_tree <- function(model, output_dir = "results/models/decision_tree
   return(TRUE)
 }
 
-# Simplify generate_predictions function
-generate_predictions <- function(model, prepared_test_data) {
+# Function to generate predictions using the trained model
+generate_predictions <- function(model, test_data) {
   message("\n=== Generating Predictions ===")
   
+  # Create a copy of test data
+  test_df <- data.frame(test_data, stringsAsFactors = TRUE)
+  
+  # Ensure all required columns exist
+  required_cols <- all.vars(model$terms)[-1]  # Exclude response variable
+  missing_cols <- setdiff(required_cols, names(test_df))
+  
+  if(length(missing_cols) > 0) {
+    stop("Missing required columns in test data: ", paste(missing_cols, collapse = ", "))
+  }
+  
   # Generate predictions
-  pred_class <- predict(model, newdata = prepared_test_data, type = "class")
-  pred_prob <- predict(model, newdata = prepared_test_data, type = "prob")
-  
-  message("Generated predictions for ", length(pred_class), " test samples")
-  
-  return(list(
-    class = pred_class,
-    prob = pred_prob[, "Good"]
-  ))
+  tryCatch({
+    pred_class <- predict(model, newdata = test_df, type = "class")
+    pred_prob <- predict(model, newdata = test_df, type = "prob")
+    
+    message("Generated predictions for ", length(pred_class), " test samples")
+    
+    return(list(
+      class = pred_class,
+      prob = pred_prob[, "Good"],
+      all_probs = pred_prob
+    ))
+  }, error = function(e) {
+    message("Error details:")
+    message("Available columns: ", paste(names(test_df), collapse = ", "))
+    message("Required columns: ", paste(required_cols, collapse = ", "))
+    stop("ERROR generating predictions: ", e$message)
+  })
 }
 
 # Function to evaluate model performance
@@ -351,7 +417,7 @@ run_decision_tree <- function(train_data, test_data) {
   tree_model <- train_decision_tree(prepared_data)
   
   # Generate predictions using prepared test data
-  predictions <- generate_predictions(tree_model, prepared_data$test)
+  predictions <- generate_predictions(tree_model, test_data)
   
   # Evaluate model
   performance <- evaluate_decision_tree(predictions, test_data$class, tree_model)

@@ -49,7 +49,9 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   train_nb <- train_data
   test_nb <- test_data
   
-  # Apply binning to both training and test data
+  # No need to call prepare_model_data anymore, handle preprocessing directly
+  
+  # Create copies to avoid modifying the originals
   train_nb <- create_bins(train_nb)
   test_nb <- create_bins(test_nb)
   
@@ -276,6 +278,11 @@ evaluate_naive_bayes <- function(predictions, actual, output_dir = "results/mode
 # Main function to run the entire naive Bayes workflow
 run_naive_bayes <- function(train_data, test_data, k_folds = 5, seed_value = 123) {
   message("\n====== Running Naive Bayes Workflow ======\n")
+  
+  # Check if test_data is available
+  if(!file.exists("data/processed/test_data.csv")) {
+    stop("Test data file not found at data/processed/test_data.csv")
+  }
   
   # Step 1: Prepare data for naive Bayes
   prepared_data <- prepare_for_naive_bayes(train_data, test_data)

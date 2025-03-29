@@ -12,7 +12,19 @@ source("scripts/utils/evaluation.R")
 
 # Load preprocessed data if not already in environment
 if(!exists("train_data") || !exists("test_data")) {
-  source("scripts/02_data_preprocessing.R")
+  message("Loading preprocessed data...")
+  # Check if CSV files exist
+  train_file <- "data/processed/train_data.csv"
+  test_file <- "data/processed/test_data.csv"
+  
+  if(file.exists(train_file) && file.exists(test_file)) {
+    train_data <- read.csv(train_file, stringsAsFactors = TRUE)
+    test_data <- read.csv(test_file, stringsAsFactors = TRUE)
+    message("Data loaded from CSV files")
+  } else {
+    message("Processing raw data...")
+    source("scripts/02_data_preprocessing.R")
+  }
 }
 
 # Function to prepare data specifically for random forests
@@ -20,14 +32,8 @@ prepare_for_random_forest <- function(train_data, test_data) {
   message("\n=== Preparing Data for Random Forest ===")
   
   # Create copies to avoid modifying the originals
-  train_rf <- train_data
-  test_rf <- test_data
-  
-  # For random forests:
-  # 1. No need to standardize numeric variables
-  # 2. No need for one-hot encoding of categorical variables
-  # 3. No special handling for outliers (trees are robust to them)
-  # 4. Might want to create some interaction features (optional)
+  train_rf <- data.frame(train_data, stringsAsFactors = TRUE)
+  test_rf <- data.frame(test_data, stringsAsFactors = TRUE)
   
   # Handle factor levels to ensure consistency
   factor_cols <- names(train_rf)[sapply(train_rf, is.factor)]
@@ -36,13 +42,11 @@ prepare_for_random_forest <- function(train_data, test_data) {
     all_levels <- unique(c(levels(train_rf[[col]]), levels(test_rf[[col]])))
     
     # Set the levels for both datasets
-    levels(train_rf[[col]]) <- all_levels
-    levels(test_rf[[col]]) <- all_levels
+    train_rf[[col]] <- factor(train_rf[[col]], levels = all_levels)
+    test_rf[[col]] <- factor(test_rf[[col]], levels = all_levels)
   }
   
   # Optional: Create additional features that might be useful
-  # Random forests can handle many features without overfitting
-  
   # Move feature engineering into a separate helper function
   engineer_features <- function(data) {
     # Create a copy of the data to avoid modifying the original
@@ -216,35 +220,59 @@ generate_predictions <- function(model, test_data, prepared_data = NULL) {
   # Create a copy of test data
   test_df <- data.frame(test_data, stringsAsFactors = TRUE)
   
-  # Apply the same feature engineering as used in training if prepared_data is available
+  # Apply feature engineering if available
   if (!is.null(prepared_data) && !is.null(prepared_data$engineer_features)) {
     message("Applying feature engineering to test data...")
     test_df <- prepared_data$engineer_features(test_df)
+  }
+  
+  # Get required columns from model
+  if (inherits(model, "train")) {
+    required_cols <- setdiff(names(model$trainingData), ".outcome")
   } else {
-    warning("No feature engineering function provided. This may cause prediction errors if the model expects engineered features.")
+    required_cols <- all.vars(model$terms)[-1]  # Exclude response variable
   }
   
-  # Handle different model types
-  if(inherits(model, "train")) {
-    # Generate predictions using caret's predict
-    pred_class <- predict(model, newdata = test_df)
-    pred_prob <- predict(model, newdata = test_df, type = "prob")
-  } else if(inherits(model, "randomForest")) {
-    # Generate predictions using randomForest's predict
-    pred_class <- predict(model, newdata = test_df, type = "class")
-    pred_prob <- predict(model, newdata = test_df, type = "prob")
+  # Check for missing columns
+  missing_cols <- setdiff(required_cols, names(test_df))
+  if (length(missing_cols) > 0) {
+    message("Missing columns: ", paste(missing_cols, collapse = ", "))
+    message("Available columns: ", paste(names(test_df), collapse = ", "))
+    stop("Missing required columns in test data")
   }
   
-  # Extract probability for positive class
-  pos_class_prob <- pred_prob[, "Good"]
+  # Ensure factor levels match
+  for (col in names(test_df)) {
+    if (is.factor(test_df[[col]])) {
+      if (inherits(model, "train")) {
+        orig_levels <- levels(model$trainingData[[col]])
+      } else {
+        orig_levels <- levels(model$model[[col]])
+      }
+      if (!is.null(orig_levels)) {
+        test_df[[col]] <- factor(test_df[[col]], levels = orig_levels)
+      }
+    }
+  }
   
-  message("Generated predictions for ", length(pred_class), " test samples")
-  
-  return(list(
-    class = pred_class,
-    prob = pos_class_prob,
-    all_probs = pred_prob
-  ))
+  # Generate predictions
+  tryCatch({
+    if(inherits(model, "train")) {
+      pred_class <- predict(model, newdata = test_df)
+      pred_prob <- predict(model, newdata = test_df, type = "prob")
+    } else {
+      pred_class <- predict(model, newdata = test_df, type = "class")
+      pred_prob <- predict(model, newdata = test_df, type = "prob")
+    }
+    
+    return(list(
+      class = pred_class,
+      prob = pred_prob[, "Good"],
+      all_probs = pred_prob
+    ))
+  }, error = function(e) {
+    stop("ERROR generating predictions: ", e$message)
+  })
 }
 
 # Function to evaluate model performance
@@ -535,35 +563,44 @@ evaluate_random_forest <- function(predictions, actual, model, prepared_data = N
 run_random_forest <- function(train_data, test_data, k_folds = 5, seed_value = 123) {
   message("\n====== Running Random Forest Workflow ======\n")
   
+  # Add data validation
+  if(nrow(test_data) == 0 || ncol(test_data) == 0) {
+    stop("Test data is empty. Please check data loading.")
+  }
+  
+  message("Initial test data dimensions: ", nrow(test_data), " x ", ncol(test_data))
+  
   # Step 1: Prepare data for random forest
   prepared_data <- prepare_for_random_forest(train_data, test_data)
+  
+  # Validate prepared data
+  if(is.null(prepared_data$test) || nrow(prepared_data$test) == 0) {
+    stop("Prepared test data is empty. Check prepare_for_random_forest function.")
+  }
+  
+  message("Prepared test data dimensions: ", nrow(prepared_data$test), " x ", ncol(prepared_data$test))
   
   # Step 2: Train random forest model
   rf_model <- train_random_forest(prepared_data, k_folds, seed_value)
   
-  # Step 3: Generate predictions
-  predictions <- generate_predictions(rf_model, test_data, prepared_data)
+  # Step 3: Generate predictions using the prepared test data
+  predictions <- generate_predictions(rf_model, prepared_data$test, prepared_data)
   
   # Step 4: Evaluate model performance
   performance <- evaluate_random_forest(predictions, test_data$class, rf_model, prepared_data)
   
   message("\n====== Random Forest Workflow Complete ======\n")
   
-  # Return model and performance metrics
   return(list(
     model = rf_model,
     predictions = predictions,
-    performance = performance
+    performance = performance,
+    prepared_data = prepared_data
   ))
 }
 
 # Run the model if this script is being run directly
 if(!exists("RANDOM_FOREST_SOURCED") || !RANDOM_FOREST_SOURCED) {
-  # Check if required data is available
-  if(!exists("train_data") || !exists("test_data")) {
-    source("scripts/02_data_preprocessing.R")
-  }
-  
   # Run random forest
   rf_results <- run_random_forest(train_data, test_data)
   
