@@ -537,16 +537,18 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
       message("WARNING: Failed to save ROC curves to ", output_file)
     }
     
-    # Return results
-    return(list(
-      roc_results = results,
-      auc_values = auc_values,
-      output_file = output_file
-    ))
-  } else {
-    message("WARNING: Not enough models with predictions to compare ROC curves")
-    return(NULL)
+    # Make sure we have results before returning
+    if(length(results) > 0 && length(auc_values) > 0) {
+      return(list(
+        roc_results = results,
+        auc_values = auc_values,
+        output_file = output_file
+      ))
+    }
   }
+  
+  # Return NULL if we don't have enough data
+  return(NULL)
 }
 
 # Function to determine the best model
