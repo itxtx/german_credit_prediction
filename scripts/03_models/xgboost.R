@@ -572,3 +572,26 @@ plot_variable_importance <- function(importance_df, title = "Variable Importance
   
   return(plot)
 }
+
+# Update the SHAP calculation function
+calculate_shap_values <- function(model, data) {
+  if(!requireNamespace("xgboost", quietly = TRUE)) {
+    message("xgboost package not available. Skipping SHAP values...")
+    return(NULL)
+  }
+  
+  tryCatch({
+    # Convert data to DMatrix if needed
+    if(!inherits(data, "xgb.DMatrix")) {
+      data <- xgb.DMatrix(data = as.matrix(data))
+    }
+    
+    # Calculate SHAP values using xgboost's built-in function
+    shap_values <- predict(model, data, predcontrib = TRUE)
+    
+    return(shap_values)
+  }, error = function(e) {
+    message("Error generating SHAP values: ", e$message)
+    return(NULL)
+  })
+}

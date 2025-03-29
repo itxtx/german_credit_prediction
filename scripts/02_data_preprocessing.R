@@ -433,3 +433,20 @@ if(!exists("DATA_PREPROCESSING_SOURCED") || !DATA_PREPROCESSING_SOURCED) {
 } else {
   message("02_data_preprocessing.R has been sourced. Use main() to run the preprocessing process.")
 }
+
+# Update the binning function
+create_bins <- function(data) {
+  # Create duration bins with better ranges
+  data$duration_bin <- cut(data$duration,
+                          breaks = c(-Inf, 12, 24, 36, 48, Inf),
+                          labels = c("0-12", "13-24", "25-36", "37-48", "48+"),
+                          include.lowest = TRUE)
+  
+  # Create credit amount bins with better ranges
+  data$credit_amount_bin <- cut(data$credit_amount,
+                               breaks = c(-Inf, 5000, 10000, 15000, Inf),
+                               labels = c("0-5k", "5k-10k", "10k-15k", "15k+"),
+                               include.lowest = TRUE)
+  
+  return(data)
+}

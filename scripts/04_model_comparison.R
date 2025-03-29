@@ -482,7 +482,8 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
            cex.lab = 1.2,
            cex.axis = 1.1,
            xlab = "False Positive Rate (1 - Specificity)",
-           ylab = "True Positive Rate (Sensitivity)")
+           ylab = "True Positive Rate (Sensitivity)",
+           print.auc = FALSE)
       
       # Add grid
       grid(nx = 10, ny = 10, col = "lightgray", lty = "dotted")
