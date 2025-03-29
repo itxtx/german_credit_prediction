@@ -283,7 +283,7 @@ evaluate_xgboost <- function(predictions, actual_label, model, output_dir = "res
     )
     
     importance_plot <- plot_variable_importance(
-      importance_df = importance_df,
+      importance_df,
       title = "XGBoost - Feature Importance (Gain)",
       max_vars = 20
     )

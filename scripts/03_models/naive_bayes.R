@@ -179,73 +179,98 @@ train_naive_bayes <- function(prepared_data, k_folds = 5, seed_value = 123) {
   return(nb_model)
 }
 
-# Function to generate predictions
-generate_predictions <- function(model, test_data, pred_type = "both") {
+# Function to generate predictions using the trained model
+generate_predictions <- function(model, test_data) {
   message("\n=== Generating Predictions ===")
   
-  # First apply binning to test data
-  test_subset <- create_bins(test_data)
+  # Debug: Print model information
+  message("\nModel Information:")
+  message("Model class: ", class(model))
+  model_feature_names <- names(model$tables)
+  message("Model features (", length(model_feature_names), "): ", 
+          paste(model_feature_names, collapse=", "))
   
-  message("\nTest data structure after binning:")
-  print(str(test_subset))
+  # Create copy of test data to avoid modifying original
+  test_subset <- test_data
   
-  # Get the feature information stored during training
-  feature_info <- attr(model, "feature_info")
-  if(is.null(feature_info)) {
-    stop("Model is missing feature information. Please retrain the model.")
+  # Debug: Print test data information
+  message("\nTest Data Information:")
+  test_feature_names <- names(test_subset)
+  message("Test features (", length(test_feature_names), "): ", 
+          paste(test_feature_names, collapse=", "))
+  
+  # Find matching features
+  matching_features <- intersect(model_feature_names, test_feature_names)
+  message("\nMatching features (", length(matching_features), "): ", 
+          paste(matching_features, collapse=", "))
+  
+  # Find missing features
+  missing_features <- setdiff(model_feature_names, test_feature_names)
+  if (length(missing_features) > 0) {
+    message("\nWARNING: Missing features in test data: ", 
+            paste(missing_features, collapse=", "))
   }
   
-  # Process features and generate predictions
-  tryCatch({
-    # Get model features from the correct attribute
-    model_features <- names(attr(model, "tables"))
-    
-    message("\nProcessing features for prediction:")
-    # Process each feature according to its type
-    for(col in model_features) {
-      if(!col %in% names(test_subset)) {
-        stop(paste("Missing required feature in test data:", col))
-      }
+  # Extra features in test data
+  extra_features <- setdiff(test_feature_names, model_feature_names)
+  if (length(extra_features) > 0) {
+    message("\nNOTE: Extra features in test data: ", 
+            paste(extra_features, collapse=", "))
+  }
+  
+  # Ensure test data has exactly the same features as the model
+  test_subset <- test_subset[, matching_features, drop = FALSE]
+  
+  # Debug: Print feature levels for categorical variables
+  message("\nFeature Levels Comparison:")
+  for (feature in matching_features) {
+    if (is.factor(test_subset[[feature]])) {
+      model_levels <- levels(model$tables[[feature]])
+      test_levels <- levels(test_subset[[feature]])
+      message("\nFeature: ", feature)
+      message("Model levels: ", paste(model_levels, collapse=", "))
+      message("Test levels: ", paste(test_levels, collapse=", "))
       
-      if(is.factor(test_subset[[col]])) {
-        # Get expected levels from the model
-        expected_levels <- levels(attr(model, "tables")[[col]])
-        
-        # Convert to character then back to factor with expected levels
-        test_subset[[col]] <- factor(as.character(test_subset[[col]]), 
-                                   levels = expected_levels)
-        
-        # Debug output
-        message("\nColumn: ", col)
-        message("Expected levels: ", paste(expected_levels, collapse=", "))
-        message("Actual levels: ", paste(levels(test_subset[[col]]), collapse=", "))
-        message("NA count: ", sum(is.na(test_subset[[col]])))
+      # Ensure test data has same levels as model
+      if (!identical(model_levels, test_levels)) {
+        message("Aligning levels for feature: ", feature)
+        test_subset[[feature]] <- factor(test_subset[[feature]], levels = model_levels)
       }
     }
+  }
+  
+  # Generate predictions
+  tryCatch({
+    # Debug: Print final dimensions
+    message("\nFinal data dimensions:")
+    message("Number of features used for prediction: ", ncol(test_subset))
+    message("Number of test samples: ", nrow(test_subset))
     
-    # Keep only the features used in the model
-    test_subset <- test_subset[, model_features, drop = FALSE]
+    pred_class <- predict(model, test_subset)
+    pred_prob <- predict(model, test_subset, type = "prob")
     
-    # Generate predictions
-    results <- list()
-    if(pred_type %in% c("both", "class")) {
-      results$class <- predict(model, newdata = test_subset)
+    if (is.null(pred_prob)) {
+      # If probabilities are not available, create dummy probabilities
+      warning("Probabilities not available from model, using dummy values")
+      pred_prob <- ifelse(pred_class == "Good", 0.75, 0.25)
     }
-    if(pred_type %in% c("both", "raw")) {
-      results$all_probs <- predict(model, newdata = test_subset, type = "prob")
-      results$prob <- results$all_probs[, "Good"]
-    }
     
-    message("Generated predictions for ", nrow(test_subset), " test samples")
-    return(results)
+    return(list(
+      class = pred_class,
+      prob = pred_prob,
+      all_probs = if(is.matrix(pred_prob)) {
+        as.data.frame(pred_prob)
+      } else {
+        data.frame(Bad = 1 - pred_prob, Good = pred_prob)
+      }
+    ))
     
   }, error = function(e) {
-    message("\nDetailed error information:")
-    message("Test data structure:")
-    print(str(test_subset))
-    message("\nModel features:")
-    print(model_features)
-    stop(paste("Error generating predictions:", e$message))
+    message("Error details:")
+    message("Error message: ", e$message)
+    message("Model features: ", paste(model_feature_names, collapse=", "))
+    message("Test features: ", paste(names(test_subset), collapse=", "))
+    stop("Prediction error: ", e$message)
   })
 }
 
