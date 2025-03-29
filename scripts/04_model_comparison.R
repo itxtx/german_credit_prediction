@@ -800,10 +800,15 @@ if(!exists("MODEL_COMPARISON_SOURCED") || !MODEL_COMPARISON_SOURCED) {
   message("04_model_comparison.R has been sourced. Use run_model_comparison() to compare models.")
 }
 
-# Update the comparison metrics function
+# Update the comparison_metrics function
 comparison_metrics <- function(data, metrics) {
-  # Use base R subsetting instead of tidyselect
-  data[, metrics, drop = FALSE]
+  if(requireNamespace("dplyr", quietly = TRUE)) {
+    data %>% 
+      dplyr::select(dplyr::all_of(metrics))
+  } else {
+    # Fallback to base R if dplyr is not available
+    data[, metrics, drop = FALSE]
+  }
 }
 
 # Update the compare_models function

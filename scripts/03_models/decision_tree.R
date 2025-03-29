@@ -77,19 +77,26 @@ engineer_features <- function(data) {
 prepare_for_decision_tree <- function(train_data, test_data) {
   message("\n=== Preparing Data for Decision Tree ===")
   
-  # Validate that all columns in train_data exist in test_data
-  train_cols <- names(train_data)
-  test_cols <- names(test_data)
-  missing_cols <- setdiff(train_cols, test_cols)
-  
-  if(length(missing_cols) > 0) {
-    stop("Test data is missing columns that exist in training data: ",
-         paste(missing_cols, collapse = ", "))
-  }
-  
   # Create copies
-  train_dt <- train_data
-  test_dt <- test_data
+  train_dt <- data.frame(train_data, stringsAsFactors = TRUE)
+  test_dt <- data.frame(test_data, stringsAsFactors = TRUE)
+  
+  # Ensure all columns from training data exist in test data
+  missing_cols <- setdiff(names(train_dt), names(test_dt))
+  if(length(missing_cols) > 0) {
+    # For each missing column, add it with appropriate default values
+    for(col in missing_cols) {
+      if(is.numeric(train_dt[[col]])) {
+        test_dt[[col]] <- mean(train_dt[[col]], na.rm = TRUE)
+      } else if(is.factor(train_dt[[col]])) {
+        most_common <- names(sort(table(train_dt[[col]]), decreasing = TRUE))[1]
+        test_dt[[col]] <- factor(most_common, levels = levels(train_dt[[col]]))
+      } else {
+        test_dt[[col]] <- NA
+      }
+    }
+    message("Added missing columns to test data: ", paste(missing_cols, collapse = ", "))
+  }
   
   # Simple imputation for both train and test
   for(col in names(train_dt)) {
@@ -100,10 +107,12 @@ prepare_for_decision_tree <- function(train_data, test_data) {
       test_dt[[col]][is.na(test_dt[[col]])] <- col_mean
     } else if(is.factor(train_dt[[col]])) {
       # For factor columns, replace NA with mode from training data
-      # Remove NA values before calculating mode
       mode_val <- names(sort(table(train_dt[[col]][!is.na(train_dt[[col]])]), decreasing = TRUE))[1]
       train_dt[[col]][is.na(train_dt[[col]])] <- mode_val
       test_dt[[col]][is.na(test_dt[[col]])] <- mode_val
+      
+      # Ensure test data has same levels as train data
+      test_dt[[col]] <- factor(test_dt[[col]], levels = levels(train_dt[[col]]))
     }
   }
   
@@ -269,7 +278,7 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
   # Print performance metrics
   message("\nPerformance Metrics:")
   metrics <- c("accuracy", "precision", "recall", "f1", "auc")
-  for(metric in all_of(metrics)) {
+  for(metric in metrics) {
     if(!is.null(performance[[metric]])) {
       message(paste0(toupper(substring(metric, 1, 1)), substring(metric, 2), ": ", 
                     round(performance[[metric]], 4)))
@@ -378,7 +387,7 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
   cat("Date: ", as.character(Sys.Date()), "\n\n")
   
   cat("PERFORMANCE METRICS:\n")
-  for(metric in all_of(metrics)) {
+  for(metric in metrics) {
     if(!is.null(performance[[metric]])) {
       cat(paste0(toupper(substring(metric, 1, 1)), substring(metric, 2), ": ", 
                 round(performance[[metric]], 4), "\n"))
@@ -406,9 +415,15 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
   return(performance)
 }
 
-# Simplify main workflow
+# Main function to run the entire decision tree workflow
 run_decision_tree <- function(train_data, test_data) {
   message("\n====== Running Decision Tree Workflow ======\n")
+  
+  # Create output directory if it doesn't exist
+  output_dir <- "results/models/decision_tree"
+  if(!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
   
   # Prepare data
   prepared_data <- prepare_for_decision_tree(train_data, test_data)
@@ -417,10 +432,20 @@ run_decision_tree <- function(train_data, test_data) {
   tree_model <- train_decision_tree(prepared_data)
   
   # Generate predictions using prepared test data
-  predictions <- generate_predictions(tree_model, test_data)
+  predictions <- generate_predictions(tree_model, prepared_data$test)
   
   # Evaluate model
   performance <- evaluate_decision_tree(predictions, test_data$class, tree_model)
+  
+  # Save model and results
+  model_path <- file.path(output_dir, "decision_tree_model.rds")
+  saveRDS(tree_model, model_path)
+  message("Model saved to: ", model_path)
+  
+  # Save predictions
+  pred_path <- file.path(output_dir, "predictions.rds")
+  saveRDS(predictions, pred_path)
+  message("Predictions saved to: ", pred_path)
   
   return(list(
     model = tree_model,
@@ -438,9 +463,6 @@ if(!exists("DECISION_TREE_SOURCED") || !DECISION_TREE_SOURCED) {
   
   # Run decision tree
   results <- run_decision_tree(train_data, test_data)
-  
-  # Save model for later use
-  saveRDS(results$model, "results/models/decision_tree/decision_tree_model.rds")
   
   DECISION_TREE_SOURCED <- TRUE
 } else {

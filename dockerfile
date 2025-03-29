@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 RUN R -e "install.packages(c('readr', 'dplyr', 'tidyr', 'ggplot2', 'caret', 'rpart', 'rpart.plot', \
                             'randomForest', 'neuralnet', 'ROCR', 'pROC', 'e1071', \
                             'kernlab', 'MASS', 'recipes', 'xgboost', 'devtools', \
-                            'BiocManager', 'rmarkdown', 'knitr', 'naivebayes', 'fmsb'), \
+                            'BiocManager', 'rmarkdown', 'knitr', 'naivebayes', 'fmsb', 'e1071'), \
                             repos='https://cloud.r-project.org/')"
 # Create directories for the project structure
 RUN mkdir -p /app/data/raw \

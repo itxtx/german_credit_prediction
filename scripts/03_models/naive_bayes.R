@@ -10,6 +10,9 @@
 source("scripts/utils/setup.R")
 source("scripts/utils/evaluation.R")
 
+# Load required packages
+library(naivebayes)  # Change from e1071 to naivebayes package
+
 # Load preprocessed data if not already in environment
 if(!exists("train_data") || !exists("test_data")) {
   source("scripts/02_data_preprocessing.R")
@@ -49,40 +52,66 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   train_nb <- train_data
   test_nb <- test_data
   
-  # No need to call prepare_model_data anymore, handle preprocessing directly
-  
-  # Create copies to avoid modifying the originals
+  # Create binned versions
   train_nb <- create_bins(train_nb)
   test_nb <- create_bins(test_nb)
   
-  # Store original feature information
+  # Debug: Print initial structure
+  message("\nInitial data structure:")
+  message("Training data:")
+  print(str(train_nb))
+  message("\nTest data:")
+  print(str(test_nb))
+  
+  # Store feature information
   feature_info <- list()
   
-  # Ensure all categorical variables are factors
-  factor_cols <- names(train_nb)[sapply(train_nb, is.character)]
-  if(length(factor_cols) > 0) {
-    message("Converting character columns to factors...")
-    for(col in factor_cols) {
-      train_nb[[col]] <- as.factor(train_nb[[col]])
-      if(col %in% names(test_nb)) {
-        test_nb[[col]] <- as.factor(test_nb[[col]])
-      }
+  # First convert all character columns to factors
+  char_cols <- names(train_nb)[sapply(train_nb, is.character)]
+  for(col in char_cols) {
+    train_nb[[col]] <- as.factor(train_nb[[col]])
+    if(col %in% names(test_nb)) {
+      test_nb[[col]] <- as.factor(test_nb[[col]])
     }
   }
   
-  # Process all factor columns and store their levels
+  # Process all factor columns with careful level handling
   factor_cols <- names(train_nb)[sapply(train_nb, is.factor)]
   for(col in factor_cols) {
     if(col %in% names(test_nb)) {
-      # Get all levels from both datasets
-      all_levels <- unique(c(levels(train_nb[[col]]), levels(test_nb[[col]])))
+      # Convert to character first to preserve all values
+      train_values <- as.character(train_nb[[col]])
+      test_values <- as.character(test_nb[[col]])
+      
+      # Get all unique values
+      all_levels <- unique(c(train_values, test_values))
       
       # Store levels for later use
       feature_info[[col]] <- all_levels
       
-      # Set the levels for both datasets
-      train_nb[[col]] <- factor(train_nb[[col]], levels = all_levels)
-      test_nb[[col]] <- factor(test_nb[[col]], levels = all_levels)
+      # Debug output before conversion
+      message("\nProcessing column: ", col)
+      message("Unique values in training: ", paste(unique(train_values), collapse=", "))
+      message("Unique values in test: ", paste(unique(test_values), collapse=", "))
+      message("Combined levels: ", paste(all_levels, collapse=", "))
+      
+      # Convert both datasets using the same levels
+      train_nb[[col]] <- factor(train_values, levels = all_levels)
+      test_nb[[col]] <- factor(test_values, levels = all_levels)
+      
+      # Verify conversion
+      message("After conversion:")
+      message("Training levels (", length(levels(train_nb[[col]])), "): ", 
+              paste(levels(train_nb[[col]]), collapse=", "))
+      message("Test levels (", length(levels(test_nb[[col]])), "): ", 
+              paste(levels(test_nb[[col]]), collapse=", "))
+      
+      # Verify no NAs were introduced
+      train_nas <- sum(is.na(train_nb[[col]]))
+      test_nas <- sum(is.na(test_nb[[col]]))
+      if(train_nas > 0 || test_nas > 0) {
+        message("WARNING: NAs detected - Train: ", train_nas, ", Test: ", test_nas)
+      }
     }
   }
   
@@ -90,12 +119,17 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   numeric_cols <- names(train_nb)[sapply(train_nb, is.numeric)]
   feature_info[["numeric_cols"]] <- numeric_cols
   
-  # Create a formula that includes all predictors except the class
-  predictors <- setdiff(names(train_nb), "class")
+  # Create formula excluding raw numeric columns that have binned versions
+  predictors <- setdiff(names(train_nb), 
+                       c("class", "duration", "credit_amount"))
   formula_string <- paste("class ~", paste(predictors, collapse = " + "))
   model_formula <- as.formula(formula_string)
   
-  message("Created model formula with ", length(predictors), " predictors")
+  message("\nFinal data structure:")
+  message("Training data:")
+  print(str(train_nb))
+  message("\nTest data:")
+  print(str(test_nb))
   
   return(list(
     train = train_nb,
@@ -105,85 +139,114 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   ))
 }
 
-# Function to train naive Bayes model with cross-validation
+# Function to train naive Bayes model
 train_naive_bayes <- function(prepared_data, k_folds = 5, seed_value = 123) {
-  message("\n=== Training Naive Bayes Model with Cross-Validation ===")
-  
-  # Set seed for reproducibility
-  set.seed(seed_value)
+  message("\n=== Training Naive Bayes Model ===")
   
   # Extract prepared data
   train_data <- prepared_data$train
   model_formula <- prepared_data$formula
   
-  # Add check for missing values before training
-  train_data <- na.omit(train_data)  # Remove any rows with missing values
+  # Debug: Print training data structure
+  message("\nTraining data structure:")
+  print(str(train_data))
   
-  # Now train the model with Laplace smoothing
-  nb_model <- naive_bayes(
-    formula = model_formula,
-    data = train_data,
-    laplace = 1  # Add Laplace smoothing
-  )
-  
-  # Store feature information in the model
-  nb_model$feature_info <- prepared_data$feature_info
+  # Train the model with Laplace smoothing
+  nb_model <- tryCatch({
+    model <- naive_bayes(
+      formula = model_formula,
+      data = train_data,
+      laplace = 1,  # Add Laplace smoothing
+      usekernel = FALSE  # Disable kernel density estimation for numeric variables
+    )
+    
+    # Store feature information
+    attr(model, "feature_info") <- prepared_data$feature_info
+    
+    # Verify model structure
+    message("\nModel structure:")
+    print(str(model))
+    
+    model
+  }, error = function(e) {
+    message("Error during model training:")
+    message(e$message)
+    message("\nTraining data summary:")
+    print(summary(train_data))
+    stop("Failed to train Naive Bayes model")
+  })
   
   return(nb_model)
 }
 
-# Function to generate predictions using the trained model
-generate_predictions <- function(model, test_data) {
+# Function to generate predictions
+generate_predictions <- function(model, test_data, pred_type = "both") {
   message("\n=== Generating Predictions ===")
   
   # First apply binning to test data
   test_subset <- create_bins(test_data)
   
+  message("\nTest data structure after binning:")
+  print(str(test_subset))
+  
   # Get the feature information stored during training
-  feature_info <- model$feature_info
+  feature_info <- attr(model, "feature_info")
   if(is.null(feature_info)) {
     stop("Model is missing feature information. Please retrain the model.")
   }
   
-  # Ensure test data has exactly the same features as training data
-  model_features <- names(model$tables)
-  
-  # Process each feature according to its type
-  for(col in model_features) {
-    if(col %in% names(feature_info)) {  # If it's a factor column
+  # Process features and generate predictions
+  tryCatch({
+    # Get model features from the correct attribute
+    model_features <- names(attr(model, "tables"))
+    
+    message("\nProcessing features for prediction:")
+    # Process each feature according to its type
+    for(col in model_features) {
       if(!col %in% names(test_subset)) {
         stop(paste("Missing required feature in test data:", col))
       }
       
-      # Convert to factor with exactly the same levels as in training
-      test_subset[[col]] <- factor(test_subset[[col]], 
-                                  levels = feature_info[[col]])
-      
-      message("Aligned levels for feature: ", col)
-    } else if(col %in% feature_info$numeric_cols) {  # If it's a numeric column
-      if(!is.numeric(test_subset[[col]])) {
-        test_subset[[col]] <- as.numeric(as.character(test_subset[[col]]))
+      if(is.factor(test_subset[[col]])) {
+        # Get expected levels from the model
+        expected_levels <- levels(attr(model, "tables")[[col]])
+        
+        # Convert to character then back to factor with expected levels
+        test_subset[[col]] <- factor(as.character(test_subset[[col]]), 
+                                   levels = expected_levels)
+        
+        # Debug output
+        message("\nColumn: ", col)
+        message("Expected levels: ", paste(expected_levels, collapse=", "))
+        message("Actual levels: ", paste(levels(test_subset[[col]]), collapse=", "))
+        message("NA count: ", sum(is.na(test_subset[[col]])))
       }
     }
-  }
-  
-  # Keep only the features used in the model
-  test_subset <- test_subset[, model_features, drop = FALSE]
-  
-  # Generate predictions
-  pred_class <- predict(model, newdata = test_subset, type = "class")
-  pred_prob <- predict(model, newdata = test_subset, type = "prob")
-  
-  # Extract probability for positive class
-  pos_class_prob <- pred_prob[, "Good"]
-  
-  message("Generated predictions for ", length(pred_class), " test samples")
-  
-  return(list(
-    class = pred_class,
-    prob = pos_class_prob,
-    all_probs = pred_prob
-  ))
+    
+    # Keep only the features used in the model
+    test_subset <- test_subset[, model_features, drop = FALSE]
+    
+    # Generate predictions
+    results <- list()
+    if(pred_type %in% c("both", "class")) {
+      results$class <- predict(model, newdata = test_subset)
+    }
+    if(pred_type %in% c("both", "raw")) {
+      results$all_probs <- predict(model, newdata = test_subset, type = "prob")
+      results$prob <- results$all_probs[, "Good"]
+    }
+    
+    message("Generated predictions for ", nrow(test_subset), " test samples")
+    return(results)
+    
+  }, error = function(e) {
+    message("\nDetailed error information:")
+    message("Test data structure:")
+    print(str(test_subset))
+    message("\nModel features:")
+    print(model_features)
+    stop(paste("Error generating predictions:", e$message))
+  })
 }
 
 # Function to evaluate model performance
@@ -279,9 +342,18 @@ evaluate_naive_bayes <- function(predictions, actual, output_dir = "results/mode
 run_naive_bayes <- function(train_data, test_data, k_folds = 5, seed_value = 123) {
   message("\n====== Running Naive Bayes Workflow ======\n")
   
-  # Check if test_data is available
-  if(!file.exists("data/processed/test_data.csv")) {
-    stop("Test data file not found at data/processed/test_data.csv")
+  # Check if test_data is valid
+  if(is.null(test_data) || nrow(test_data) == 0) {
+    # Try to load test data from file
+    test_file <- "data/processed/test_data.csv"
+    if(file.exists(test_file)) {
+      test_data <- read.csv(test_file, stringsAsFactors = TRUE)
+      message("Loaded test data from file with ", nrow(test_data), " rows")
+    }
+    
+    if(is.null(test_data) || nrow(test_data) == 0) {
+      stop("Test data is empty or could not be loaded")
+    }
   }
   
   # Step 1: Prepare data for naive Bayes
@@ -304,6 +376,19 @@ run_naive_bayes <- function(train_data, test_data, k_folds = 5, seed_value = 123
     predictions = predictions,
     performance = performance
   ))
+}
+
+# Add this new function at the end of the file, before the final if-block
+predict_naive_bayes <- function(model, newdata, type = "both") {
+  if(!inherits(model, "naiveBayes")) {
+    stop("Model must be a naive Bayes model")
+  }
+  
+  if(!attr(model, "model_type") == "gaussian") {
+    stop("Invalid model type. Expected 'gaussian'")
+  }
+  
+  return(generate_predictions(model, newdata, pred_type = type))
 }
 
 # Run the model if this script is being run directly

@@ -277,23 +277,26 @@ evaluate_xgboost <- function(predictions, actual_label, model, output_dir = "res
   # Check if importance data exists
   if (!is.null(importance) && nrow(importance) > 0) {
     # Create importance plot
+    importance_df <- data.frame(
+      Feature = importance$Feature,
+      Gain = importance$Gain
+    )
+    
     importance_plot <- plot_variable_importance(
-      importance_df = data.frame(
-        Feature = importance$Feature,
-        Gain = importance$Gain
-      ),
+      importance_df = importance_df,
       title = "XGBoost - Feature Importance (Gain)",
       max_vars = 20
     )
     
     # Save the plot if it was created successfully
     if (!is.null(importance_plot)) {
-      ggsave(
+      ggplot2::ggsave(
         file.path(output_dir, "feature_importance.png"),
         importance_plot,
         width = 10,
         height = 8
       )
+      message("Variable importance plot saved to: ", file.path(output_dir, "feature_importance.png"))
     }
   } else {
     warning("No feature importance data available")
@@ -549,4 +552,37 @@ predict_xgb <- function(model, test_data) {
   prepared_test <- prepare_xgb_data(test_data)
   predictions <- predict(model, prepared_test$data)
   return(predictions)
+}
+
+# Update the plot_variable_importance function
+plot_variable_importance <- function(importance_df, title = "Variable Importance", max_vars = 20) {
+  if(!requireNamespace("ggplot2", quietly = TRUE)) {
+    message("ggplot2 package is required for plotting variable importance")
+    return(NULL)
+  }
+  
+  # Ensure importance_df has the required columns
+  if(!all(c("Feature", "Gain") %in% names(importance_df))) {
+    stop("importance_df must contain 'Feature' and 'Gain' columns")
+  }
+  
+  # Sort by importance and take top variables
+  importance_df <- importance_df[order(-importance_df$Gain), ]
+  if(nrow(importance_df) > max_vars) {
+    importance_df <- importance_df[1:max_vars, ]
+  }
+  
+  # Create the plot
+  plot <- ggplot2::ggplot(importance_df, 
+                         ggplot2::aes(x = reorder(Feature, Gain), y = Gain)) +
+    ggplot2::geom_bar(stat = "identity", fill = "steelblue") +
+    ggplot2::coord_flip() +
+    ggplot2::labs(
+      title = title,
+      x = "Features",
+      y = "Importance (Gain)"
+    ) +
+    ggplot2::theme_minimal()
+  
+  return(plot)
 }

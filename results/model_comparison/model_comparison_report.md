@@ -11,11 +11,8 @@ This report compares the performance of different machine learning models traine
 The following models were trained and evaluated:
 
 - ** random forest **
-- ** svm **
 - ** logistic regression **
-- ** xgboost **
 - ** naive bayes **
-- ** decision tree **
 
 ## 3. Performance Metrics
 
@@ -23,12 +20,9 @@ The following models were trained and evaluated:
 
 | Model |  accuracy | precision | recall | f1 | auc  |
 | ---|---|---|---|---|--- |
-|  random_forest  |  0.6667 | **0.8618** | 0.6238 | 0.7238 | **0.7743**  |
-|  svm  |  **0.6733** | 0.8544 | **0.6429** | **0.7337** | 0.7639  |
-|  logistic_regression  |  0.66 | 0.8418 | 0.6333 | 0.7228 | 0.7575  |
-|  xgboost  |  0.6333 | 0.8205 | 0.6095 | 0.6995 | 0.7384  |
-|  naive_bayes  |  0.5967 | 0.8346 | 0.5286 | 0.6472 | 0.697  |
-|  decision_tree  |  0.6067 | 0.8239 | 0.5571 | 0.6648 | 0.684  |
+|  random_forest  |  **0.6667** | **0.8618** | 0.6238 | **0.7238** | **0.7743**  |
+|  logistic_regression  |  0.66 | 0.8418 | **0.6333** | 0.7228 | 0.7575  |
+|  naive_bayes  |  0.6 | 0.8409 | 0.5286 | 0.6491 | 0.6979  |
 
 ## 4. Best Model
 
@@ -39,11 +33,8 @@ Based on the  auc  metric, the best performing model is ** random forest ** with
 | Rank | Model |  auc  |
 |---|---|---|
 |  1  |  random forest  |  0.7743  |
-|  2  |  svm  |  0.7639  |
-|  3  |  logistic regression  |  0.7575  |
-|  4  |  xgboost  |  0.7384  |
-|  5  |  naive bayes  |  0.697  |
-|  6  |  decision tree  |  0.684  |
+|  2  |  logistic regression  |  0.7575  |
+|  3  |  naive bayes  |  0.6979  |
 
 ## 6. Performance Visualizations
 

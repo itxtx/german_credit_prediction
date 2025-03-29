@@ -217,6 +217,19 @@ train_random_forest <- function(prepared_data, k_folds = 5, seed_value = 123) {
 generate_predictions <- function(model, test_data, prepared_data = NULL) {
   message("\n=== Generating Predictions ===")
   
+  # Validate test data
+  if(is.null(test_data)) {
+    stop("Test data is NULL")
+  }
+  
+  if(!is.data.frame(test_data)) {
+    test_data <- as.data.frame(test_data)
+  }
+  
+  if(nrow(test_data) == 0) {
+    stop("Test data is empty")
+  }
+  
   # Create a copy of test data
   test_df <- data.frame(test_data, stringsAsFactors = TRUE)
   
@@ -233,24 +246,24 @@ generate_predictions <- function(model, test_data, prepared_data = NULL) {
     required_cols <- all.vars(model$terms)[-1]  # Exclude response variable
   }
   
-  # Check for missing columns
+  # Add missing columns with appropriate default values
   missing_cols <- setdiff(required_cols, names(test_df))
   if (length(missing_cols) > 0) {
-    message("Missing columns: ", paste(missing_cols, collapse = ", "))
-    message("Available columns: ", paste(names(test_df), collapse = ", "))
-    stop("Missing required columns in test data")
-  }
-  
-  # Ensure factor levels match
-  for (col in names(test_df)) {
-    if (is.factor(test_df[[col]])) {
+    message("Adding missing columns with default values...")
+    for(col in missing_cols) {
       if (inherits(model, "train")) {
-        orig_levels <- levels(model$trainingData[[col]])
+        # Get column type from training data
+        col_class <- class(model$trainingData[[col]])
       } else {
-        orig_levels <- levels(model$model[[col]])
+        # Get column type from model terms
+        col_class <- class(model$model[[col]])
       }
-      if (!is.null(orig_levels)) {
-        test_df[[col]] <- factor(test_df[[col]], levels = orig_levels)
+      
+      # Add column with appropriate default value
+      if (col_class == "numeric") {
+        test_df[[col]] <- 0
+      } else if (col_class == "factor") {
+        test_df[[col]] <- factor(NA, levels = levels(model$model[[col]]))
       }
     }
   }
@@ -271,6 +284,9 @@ generate_predictions <- function(model, test_data, prepared_data = NULL) {
       all_probs = pred_prob
     ))
   }, error = function(e) {
+    message("Error details:")
+    message("Available columns: ", paste(names(test_df), collapse = ", "))
+    message("Required columns: ", paste(required_cols, collapse = ", "))
     stop("ERROR generating predictions: ", e$message)
   })
 }

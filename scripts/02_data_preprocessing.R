@@ -116,6 +116,10 @@ preprocess_data <- function(data,
   train_data <- split_result$train
   test_data <- split_result$test
   
+  if(nrow(test_data) == 0) {
+    stop("Test data split resulted in 0 rows. Check the train_ratio parameter and data size.")
+  }
+  
   # Step 5: Check for near-zero variance predictors
   if(remove_nzv) {
     message("\n=== Step 5: Checking for Near-Zero Variance Predictors ===")
@@ -264,12 +268,138 @@ preprocess_data <- function(data,
   
   message("\n====== Data Preprocessing Complete ======\n")
   
-  # Return processed data
+  # Add feature names to preprocessing info
+  preprocess_info$feature_names <- names(train_data)
+  
+  # Return processed data and preprocessing steps
   return(list(
     train = train_data,
     test = test_data,
-    preprocessing_info = preprocess_info
+    preprocessing_steps = preprocess_info
   ))
+}
+
+# Add these validation functions after the preprocess_data function but before main()
+
+#' Validate input data structure and contents
+#' @param data Data frame to validate
+#' @param required_features Vector of required feature names
+#' @param model_type Type of model being used
+#' @return List with validation status and any error messages
+validate_model_data <- function(data, required_features, model_type = NULL) {
+  validation_results <- list(
+    is_valid = TRUE,
+    messages = character()
+  )
+  
+  # Check if data is a data frame
+  if (!is.data.frame(data)) {
+    validation_results$is_valid <- FALSE
+    validation_results$messages <- c(validation_results$messages,
+                                   "Input must be a data frame")
+    return(validation_results)
+  }
+  
+  # Check for required features
+  missing_features <- setdiff(required_features, names(data))
+  if (length(missing_features) > 0) {
+    validation_results$is_valid <- FALSE
+    validation_results$messages <- c(validation_results$messages,
+                                   paste("Missing required features:",
+                                         paste(missing_features, collapse = ", ")))
+  }
+  
+  # Check for appropriate data types
+  for (col in names(data)) {
+    if (col %in% required_features) {
+      expected_type <- get_expected_type(col, model_type)
+      actual_type <- class(data[[col]])[1]
+      
+      if (actual_type != expected_type) {
+        validation_results$is_valid <- FALSE
+        validation_results$messages <- c(validation_results$messages,
+                                       paste("Invalid type for", col, 
+                                             "- Expected:", expected_type,
+                                             "Got:", actual_type))
+      }
+    }
+  }
+  
+  # Check for missing values
+  na_cols <- colnames(data)[colSums(is.na(data)) > 0]
+  if (length(na_cols) > 0) {
+    validation_results$is_valid <- FALSE
+    validation_results$messages <- c(validation_results$messages,
+                                   paste("Missing values found in columns:",
+                                         paste(na_cols, collapse = ", ")))
+  }
+  
+  return(validation_results)
+}
+
+#' Get expected data type for a feature
+#' @param feature_name Name of the feature
+#' @param model_type Type of model being used
+#' @return Expected R data type as string
+get_expected_type <- function(feature_name, model_type = NULL) {
+  # Define expected types for known features
+  categorical_features <- c(
+    "checking_status", "credit_history", "purpose", "savings_status",
+    "employment", "personal_status", "other_parties", "property_magnitude",
+    "other_payment_plans", "housing", "job", "own_telephone",
+    "foreign_worker", "class"
+  )
+  
+  numeric_features <- c(
+    "duration", "credit_amount", "installment_commitment",
+    "residence_since", "age", "existing_credits", "num_dependents"
+  )
+  
+  if (feature_name %in% categorical_features) {
+    return("factor")
+  } else if (feature_name %in% numeric_features) {
+    return("numeric")
+  } else {
+    return(NA_character_)
+  }
+}
+
+#' Prepare new data for model prediction
+#' @param data New data to prepare
+#' @param preprocessing_steps List of preprocessing steps from training
+#' @param model_type Type of model being used
+#' @return Processed data frame ready for prediction
+prepare_model_data <- function(data, preprocessing_steps, model_type = NULL) {
+  # Validate input data
+  validation <- validate_model_data(data, 
+                                  preprocessing_steps$feature_names,
+                                  model_type)
+  
+  if (!validation$is_valid) {
+    stop("Data validation failed:\n",
+         paste(validation$messages, collapse = "\n"))
+  }
+  
+  # Apply preprocessing steps
+  processed_data <- data
+  
+  # Convert categorical variables to factors
+  categorical_cols <- preprocessing_steps$categorical_columns
+  processed_data <- convert_to_factors(processed_data, categorical_cols)
+  
+  # Scale numeric features using saved parameters
+  if (!is.null(preprocessing_steps$scaling_parameters)) {
+    numeric_cols <- names(preprocessing_steps$scaling_parameters$center)
+    for (col in numeric_cols) {
+      if (col %in% names(processed_data)) {
+        processed_data[[col]] <- scale(processed_data[[col]],
+                                     center = preprocessing_steps$scaling_parameters$center[col],
+                                     scale = preprocessing_steps$scaling_parameters$scale[col])
+      }
+    }
+  }
+  
+  return(processed_data)
 }
 
 # Main execution section

@@ -450,13 +450,18 @@ create_train_test_split <- function(data, class_column = "class", p = 0.7, seed 
 }
 
 # Function to process the German Credit dataset for modeling
-preprocess_german_credit <- function(data, class_to_binary = TRUE, balance_classes_method = "both", 
-                                     train_test_split = 0.7, seed = 123) {
+preprocess_german_credit <- function(data, class_to_binary = TRUE, 
+                                   balance_classes_method = "both",
+                                   train_test_split = 0.7, seed = 123, 
+                                   model_type = NULL) {
   # Set seed for reproducibility
   set.seed(seed)
   
   # Make a copy of the data to avoid modifying the original
   processed_data <- data
+  
+  # Store original column names and order
+  original_columns <- names(processed_data)
   
   # 1. Convert categorical variables to factors
   categorical_cols <- c(
@@ -470,34 +475,10 @@ preprocess_german_credit <- function(data, class_to_binary = TRUE, balance_class
   
   # 2. Convert class to binary Good/Bad if requested
   if(class_to_binary) {
-    # Check current class values
-    current_values <- levels(processed_data$class)
-    message("Current class levels: ", paste(current_values, collapse = ", "))
-    
-    # Handle different possible formats
-    if(length(current_values) == 2) {
-      if(all(current_values %in% c("1", "2"))) {
-        processed_data$class <- factor(ifelse(processed_data$class == "1", "Good", "Bad"))
-        message("Converted numeric classes (1/2) to Good/Bad")
-      } else if(all(current_values %in% c("A201", "A202"))) {
-        processed_data$class <- factor(ifelse(processed_data$class == "A201", "Good", "Bad"))
-        message("Converted text classes (A201/A202) to Good/Bad")
-      } else {
-        # Try to infer which is which based on proportions (assuming good credit is more common)
-        major_class <- names(which.max(table(processed_data$class)))
-        processed_data$class <- factor(ifelse(processed_data$class == major_class, "Good", "Bad"))
-        message("Inferred class conversion based on frequencies")
-      }
-    } else {
-      warning("Unexpected number of class levels. Check the class variable.")
-    }
-    
-    # Verify the conversion worked
-    message("Class distribution after conversion:")
-    print(table(processed_data$class))
+    processed_data$class <- standardize_class_labels(processed_data$class)
   }
   
-  # 3. Check for missing values
+  # 3. Handle missing values before split to ensure consistent treatment
   processed_data <- handle_missing_values(processed_data)
   
   # 4. Create train/test split
@@ -505,12 +486,35 @@ preprocess_german_credit <- function(data, class_to_binary = TRUE, balance_class
   train_data <- split$train
   test_data <- split$test
   
+  # Ensure factor consistency between train and test
+  test_data <- ensure_factor_consistency(train_data, test_data)
+  
+  # Validate data consistency
+  validation_result <- validate_data_consistency(train_data, test_data)
+  if(!validation_result$is_valid) {
+    warning("Data consistency issues found:\n",
+            paste(validation_result$messages, collapse="\n"))
+  }
+  
   # 5. Balance classes in training data only
   if(!is.null(balance_classes_method)) {
     train_data <- balance_classes(train_data, "class", method = balance_classes_method, seed = seed)
   }
   
-  # 6. Check for near-zero variance predictors
+  # 6. Feature engineering based on model type (if specified)
+  if(!is.null(model_type)) {
+    train_data <- prepare_model_data(train_data, model_type)
+    test_data <- prepare_model_data(test_data, model_type)
+    
+    # Re-validate after model-specific preprocessing
+    validation_result <- validate_data_consistency(train_data, test_data)
+    if(!validation_result$is_valid) {
+      warning("Post-processing data consistency issues found:\n",
+              paste(validation_result$messages, collapse="\n"))
+    }
+  }
+  
+  # 7. Check for near-zero variance predictors using only training data
   nzv <- check_near_zero_variance(train_data)
   if(length(nzv) > 0) {
     message("Removing near-zero variance predictors...")
@@ -518,76 +522,153 @@ preprocess_german_credit <- function(data, class_to_binary = TRUE, balance_class
     test_data <- test_data[, !names(test_data) %in% nzv]
   }
   
-  # 7. Scale numeric features
+  # 8. Scale numeric features
   scaled_data <- scale_features(train_data, test_data)
   train_data <- scaled_data$train
   test_data <- scaled_data$test
   
-  # 8. Ensure test set has same levels as train set for all factors
-  factor_cols <- names(train_data)[sapply(train_data, is.factor)]
-  for(col in factor_cols) {
-    # Skip if column doesn't exist in test data
-    if(!(col %in% names(test_data))) next
-    
-    # Get all levels from both datasets
-    all_levels <- unique(c(levels(train_data[[col]]), levels(test_data[[col]])))
-    
-    # Set the levels for both datasets
-    levels(train_data[[col]]) <- all_levels
-    levels(test_data[[col]]) <- all_levels
-  }
+  # 9. Ensure column consistency between train and test
+  train_data <- ensure_column_consistency(train_data, test_data)
+  test_data <- ensure_column_consistency(test_data, train_data)
   
-  message("Preprocessing complete!")
+  # 10. Preserve column order
+  column_order <- union(original_columns, names(train_data))
+  train_data <- train_data[, column_order[column_order %in% names(train_data)]]
+  test_data <- test_data[, column_order[column_order %in% names(test_data)]]
   
   return(list(
     train = train_data,
     test = test_data,
     preprocessing_steps = list(
       nzv_removed = nzv,
-      scaling_params = scaled_data$params
+      scaling_params = scaled_data$params,
+      feature_names = names(train_data),
+      categorical_cols = categorical_cols,
+      column_order = names(train_data)
     )
   ))
 }
 
-# Add this function to preserve feature names
-prepare_model_data <- function(data, model_type) {
-  # Create a copy to avoid modifying original data
-  processed_data <- data
+# New function to standardize class labels
+standardize_class_labels <- function(class_vector) {
+  # Convert to factor if not already
+  class_vector <- as.factor(class_vector)
   
-  # Ensure all expected columns exist
-  expected_columns <- c(
-    "checking_status", "duration", "credit_history", "purpose",
-    "credit_amount", "savings_status", "employment", 
-    "installment_commitment", "personal_status", "other_parties",
-    "residence_since", "property_magnitude", "age", 
-    "other_payment_plans", "housing", "existing_credits",
-    "job", "num_dependents", "own_telephone"
-  )
+  # Handle different possible formats
+  if(all(levels(class_vector) %in% c("1", "2"))) {
+    return(factor(ifelse(class_vector == "1", "Good", "Bad")))
+  } else if(all(levels(class_vector) %in% c("A201", "A202"))) {
+    return(factor(ifelse(class_vector == "A201", "Good", "Bad")))
+  } else if(all(levels(class_vector) %in% c("Good", "Bad"))) {
+    return(class_vector)
+  } else {
+    # Try to infer based on frequencies
+    major_class <- names(which.max(table(class_vector)))
+    return(factor(ifelse(class_vector == major_class, "Good", "Bad")))
+  }
+}
+
+# New function to ensure column consistency
+ensure_column_consistency <- function(data1, data2) {
+  # Find columns in data2 that are missing in data1
+  missing_cols <- setdiff(names(data2), names(data1))
   
-  missing_cols <- setdiff(expected_columns, names(processed_data))
   if(length(missing_cols) > 0) {
-    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+    for(col in missing_cols) {
+      if(is.factor(data2[[col]])) {
+        data1[[col]] <- factor(NA, levels = levels(data2[[col]]))
+      } else if(is.numeric(data2[[col]])) {
+        data1[[col]] <- NA_real_
+      } else {
+        data1[[col]] <- NA
+      }
+    }
   }
   
-  # Convert categorical variables to factors if they aren't already
-  categorical_cols <- c(
-    "checking_status", "credit_history", "purpose", "savings_status",
-    "employment", "personal_status", "other_parties", "property_magnitude",
-    "other_payment_plans", "housing", "job", "own_telephone"
-  )
+  return(data1)
+}
+
+# Update prepare_model_data function
+prepare_model_data <- function(data, model_type) {
+  if(is.null(model_type)) return(data)
   
-  processed_data[categorical_cols] <- lapply(processed_data[categorical_cols], as.factor)
+  processed_data <- data.frame(data) # Ensure we're working with a data frame
   
-  # Add derived features if needed
-  if(model_type %in% c("random_forest", "xgboost")) {
-    processed_data$age_employment_ratio <- processed_data$age / 
-      as.numeric(processed_data$employment)
-    processed_data$monthly_payment <- processed_data$credit_amount / 
-      processed_data$duration
-    processed_data$employment_years <- as.numeric(processed_data$employment)
+  # Model-specific preprocessing
+  if(model_type == "naive_bayes") {
+    # Ensure all categorical variables are properly factored
+    categorical_cols <- names(processed_data)[sapply(processed_data, function(x) 
+      is.character(x) || is.logical(x) || is.factor(x))]
+    
+    for(col in categorical_cols) {
+      if(!is.factor(processed_data[[col]])) {
+        processed_data[[col]] <- as.factor(processed_data[[col]])
+      }
+    }
+    
+    # Bin numeric variables to handle continuous data
+    numeric_cols <- names(processed_data)[sapply(processed_data, is.numeric)]
+    for(col in numeric_cols) {
+      # Create bins using training data distribution
+      breaks <- quantile(processed_data[[col]], probs = seq(0, 1, 0.2), na.rm = TRUE)
+      bin_name <- paste0(col, "_bin")
+      processed_data[[bin_name]] <- cut(processed_data[[col]], 
+                                      breaks = breaks,
+                                      labels = paste0("bin", 1:5),
+                                      include.lowest = TRUE)
+    }
   }
+  
+  # Standard derived features for tree-based models
+  if(model_type %in% c("decision_tree", "random_forest", "xgboost")) {
+    if(all(c("age", "employment") %in% names(processed_data))) {
+      processed_data$age_employment_ratio <- processed_data$age / 
+        as.numeric(processed_data$employment)
+    }
+    if(all(c("credit_amount", "duration") %in% names(processed_data))) {
+      processed_data$monthly_payment <- processed_data$credit_amount / 
+        processed_data$duration
+    }
+    if("employment" %in% names(processed_data)) {
+      processed_data$employment_years <- as.numeric(processed_data$employment)
+    }
+  }
+  
+  # Preserve column names
+  names(processed_data) <- make.names(names(processed_data), unique = TRUE)
   
   return(processed_data)
+}
+
+# Update validate_model_data to be more robust
+validate_model_data <- function(data, required_features, model_type = NULL) {
+  # Check for required features
+  missing_features <- setdiff(required_features, names(data))
+  if(length(missing_features) > 0) {
+    stop("Missing required features: ", paste(missing_features, collapse = ", "))
+  }
+  
+  # Validate data types
+  for(col in names(data)) {
+    if(is.factor(data[[col]]) && any(is.na(data[[col]]))) {
+      warning("NA values found in factor column: ", col)
+    }
+  }
+  
+  # Model-specific validations
+  if(!is.null(model_type)) {
+    if(model_type == "naive_bayes") {
+      # Check that categorical variables are factors
+      non_factor_cats <- names(data)[sapply(data, function(x) 
+        is.character(x) && !is.factor(x))]
+      if(length(non_factor_cats) > 0) {
+        warning("Character columns should be factors: ", 
+                paste(non_factor_cats, collapse = ", "))
+      }
+    }
+  }
+  
+  return(TRUE)
 }
 
 # If this script is run directly, demonstrate functionality
@@ -597,26 +678,93 @@ if(!exists("PREPROCESSING_SOURCED") || !PREPROCESSING_SOURCED) {
   PREPROCESSING_SOURCED <- TRUE
 }
 
-validate_model_data <- function(data, required_features) {
-  missing_features <- setdiff(required_features, names(data))
-  if(length(missing_features) > 0) {
-    stop("Missing required features: ", paste(missing_features, collapse = ", "))
-  }
-  
-  # Validate data types
-  for(col in names(data)) {
-    if(is.factor(data[[col]])) {
-      if(any(is.na(data[[col]]))) {
-        warning("NA values found in factor column: ", col)
-      }
-    }
-  }
-  
-  return(TRUE)
-}
-
 # Function to prepare data for model training/prediction
 prepare_data <- function(data, model_type) {
   # This is just an alias for prepare_model_data to maintain compatibility
   return(prepare_model_data(data, model_type))
+}
+
+# Function to ensure consistent factor levels between datasets
+ensure_factor_consistency <- function(reference_data, target_data) {
+  message("Ensuring factor level consistency between datasets...")
+  
+  # Get all factor columns
+  factor_cols <- names(reference_data)[sapply(reference_data, is.factor)]
+  modifications <- 0
+  
+  for(col in factor_cols) {
+    if(!is.factor(target_data[[col]])) {
+      target_data[[col]] <- as.factor(target_data[[col]])
+      modifications <- modifications + 1
+    }
+    
+    ref_levels <- levels(reference_data[[col]])
+    target_levels <- levels(target_data[[col]])
+    
+    # Check for new levels in target data
+    new_levels <- setdiff(target_levels, ref_levels)
+    if(length(new_levels) > 0) {
+      warning(sprintf("Column '%s' has %d new levels in target data: %s", 
+                     col, length(new_levels), paste(new_levels, collapse=", ")))
+      # Replace new levels with NA or most frequent level
+      target_data[[col]] <- factor(as.character(target_data[[col]]), 
+                                  levels = ref_levels)
+      modifications <- modifications + 1
+    }
+    
+    # Ensure all reference levels exist in target
+    if(!identical(levels(target_data[[col]]), ref_levels)) {
+      levels(target_data[[col]]) <- ref_levels
+      modifications <- modifications + 1
+    }
+  }
+  
+  message(sprintf("Made %d modifications to ensure factor consistency", modifications))
+  return(target_data)
+}
+
+# Function to validate data consistency
+validate_data_consistency <- function(train_data, test_data) {
+  validation_results <- list(
+    is_valid = TRUE,
+    messages = character()
+  )
+  
+  # Check column presence
+  train_cols <- colnames(train_data)
+  test_cols <- colnames(test_data)
+  
+  missing_cols <- setdiff(train_cols, test_cols)
+  if(length(missing_cols) > 0) {
+    validation_results$is_valid <- FALSE
+    validation_results$messages <- c(validation_results$messages,
+      sprintf("Missing columns in test data: %s", paste(missing_cols, collapse=", ")))
+  }
+  
+  # Check factor levels
+  factor_cols <- names(train_data)[sapply(train_data, is.factor)]
+  for(col in factor_cols) {
+    if(col %in% test_cols) {
+      train_levels <- levels(train_data[[col]])
+      test_levels <- levels(test_data[[col]])
+      
+      if(!identical(train_levels, test_levels)) {
+        validation_results$is_valid <- FALSE
+        validation_results$messages <- c(validation_results$messages,
+          sprintf("Factor level mismatch in column '%s'", col))
+      }
+    }
+  }
+  
+  # Check data types
+  for(col in intersect(train_cols, test_cols)) {
+    if(!identical(class(train_data[[col]]), class(test_data[[col]]))) {
+      validation_results$is_valid <- FALSE
+      validation_results$messages <- c(validation_results$messages,
+        sprintf("Type mismatch in column '%s': train=%s, test=%s",
+                col, class(train_data[[col]]), class(test_data[[col]])))
+    }
+  }
+  
+  return(validation_results)
 }
