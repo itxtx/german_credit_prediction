@@ -199,65 +199,18 @@ train_svm_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
 
 # Function to generate predictions using the trained model
 generate_predictions <- function(model, test_data) {
-  message("\n=== Generating Predictions ===")
+  # Generate predictions
+  pred_class <- predict(model, test_data)
+  pred_prob <- predict(model, test_data, probability = TRUE)
   
-  # Handle different model types
-  if(inherits(model, "train")) {
-    # Caret's train object
-    # Generate class predictions
-    pred_class <- predict(model, newdata = test_data)
-    
-    # Generate probability predictions
-    pred_prob <- predict(model, newdata = test_data, type = "prob")
-    
-    # Extract probability for the positive class (assuming "Good" is positive)
-    if("Good" %in% colnames(pred_prob)) {
-      pos_class_prob <- pred_prob[, "Good"]
-    } else {
-      # If "Good" not found, use second column (typically the positive class in binary)
-      pos_class_prob <- pred_prob[, 2]
-      message("Used second probability column as positive class")
-    }
-  } else if(inherits(model, "svm")) {
-    # Direct svm object from e1071
-    # Generate class predictions
-    pred_class <- predict(model, newdata = test_data, type = "class")
-    
-    # Generate probability predictions if model was trained with probability=TRUE
-    if(model$prob) {
-      pred_prob_attr <- predict(model, newdata = test_data, probability = TRUE)
-      prob_matrix <- attr(pred_prob_attr, "probabilities")
-      
-      # Find the column for the positive class
-      if("Good" %in% colnames(prob_matrix)) {
-        pos_class_prob <- prob_matrix[, "Good"]
-      } else {
-        # If "Good" not found, use second column
-        pos_class_prob <- prob_matrix[, 2]
-        message("Used second probability column as positive class")
-      }
-    } else {
-      # If probabilities not available, use decision values (less reliable)
-      message("WARNING: SVM model was not trained with probability=TRUE")
-      decision_values <- predict(model, newdata = test_data, decision.values = TRUE)
-      attr_decision <- attr(decision_values, "decision.values")
-      # Convert decision values to pseudo-probabilities with sigmoid function
-      pos_class_prob <- 1 / (1 + exp(-attr_decision))
-    }
-  } else {
-    stop("Unknown model type. Cannot generate predictions.")
-  }
-  
-  # Ensure pred_class is a factor with the right levels
-  if(!is.factor(pred_class)) {
-    pred_class <- factor(pred_class, levels = c("Bad", "Good"))
-  }
-  
-  message("Generated predictions for ", length(pred_class), " test samples")
+  # Extract probabilities
+  prob_attr <- attr(pred_prob, "probabilities")
+  pos_class_prob <- prob_attr[, "Good"]
   
   return(list(
     class = pred_class,
-    prob = pos_class_prob
+    prob = pos_class_prob,
+    all_probs = prob_attr
   ))
 }
 
@@ -570,4 +523,28 @@ if(!exists("SVM_SOURCED") || !SVM_SOURCED) {
   SVM_SOURCED <- TRUE
 } else {
   message("svm_model.R has been sourced. Use run_svm() to train and evaluate the model.")
+}
+
+library(e1071)
+library(caret)
+
+# Train SVM model
+train_svm <- function(train_data) {
+  # Train SVM with radial kernel
+  svm_model <- svm(
+    class ~ .,
+    data = train_data,
+    kernel = "radial",
+    probability = TRUE,
+    scale = TRUE
+  )
+  
+  return(svm_model)
+}
+
+# Generate predictions
+predict_svm <- function(model, test_data) {
+  predictions <- predict(model, test_data, probability = TRUE)
+  prob_predictions <- attr(predictions, "probabilities")[, "Good"]
+  return(prob_predictions)
 }

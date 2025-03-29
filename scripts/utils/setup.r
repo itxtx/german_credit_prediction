@@ -362,3 +362,8 @@ if(!exists("SETUP_SOURCED") || !SETUP_SOURCED) {
   setup_environment()
   SETUP_SOURCED <- TRUE
 }
+
+if (!requireNamespace("naivebayes", quietly = TRUE)) {
+  install.packages("naivebayes")
+}
+library(naivebayes)

@@ -45,6 +45,9 @@ prepare_for_random_forest <- function(train_data, test_data) {
   
   # Move feature engineering into a separate helper function
   engineer_features <- function(data) {
+    # Create a copy of the data to avoid modifying the original
+    data <- data.frame(data, stringsAsFactors = TRUE)
+    
     # Calculate credit amount per month
     if("duration" %in% names(data) && "credit_amount" %in% names(data)) {
       data$monthly_payment <- data$credit_amount / data$duration
@@ -65,7 +68,15 @@ prepare_for_random_forest <- function(train_data, test_data) {
           "A75" = 7      # highest level
         )
         
+        # Convert employment to numeric, with error handling
         data$employment_years <- employment_map[as.character(data$employment)]
+        
+        # Handle any NA values that might occur from unmatched levels
+        if(any(is.na(data$employment_years))) {
+          warning("Some employment categories couldn't be mapped. Using median value for missing cases.")
+          data$employment_years[is.na(data$employment_years)] <- median(employment_map)
+        }
+        
         data$age_employment_ratio <- data$age / (data$employment_years + 0.1)
       }
     }
@@ -202,40 +213,30 @@ train_random_forest <- function(prepared_data, k_folds = 5, seed_value = 123) {
 generate_predictions <- function(model, test_data, prepared_data = NULL) {
   message("\n=== Generating Predictions ===")
   
-  # Apply feature engineering if prepared_data is provided
+  # Create a copy of test data
+  test_df <- data.frame(test_data, stringsAsFactors = TRUE)
+  
+  # Apply the same feature engineering as used in training if prepared_data is available
   if (!is.null(prepared_data) && !is.null(prepared_data$engineer_features)) {
-    test_data <- prepared_data$engineer_features(test_data)
+    message("Applying feature engineering to test data...")
+    test_df <- prepared_data$engineer_features(test_df)
+  } else {
+    warning("No feature engineering function provided. This may cause prediction errors if the model expects engineered features.")
   }
   
   # Handle different model types
   if(inherits(model, "train")) {
-    # Caret's train object
-    # Generate class predictions
-    pred_class <- predict(model, newdata = test_data)
-    
-    # Generate probability predictions
-    pred_prob <- predict(model, newdata = test_data, type = "prob")
+    # Generate predictions using caret's predict
+    pred_class <- predict(model, newdata = test_df)
+    pred_prob <- predict(model, newdata = test_df, type = "prob")
   } else if(inherits(model, "randomForest")) {
-    # Direct randomForest object
-    # Generate class predictions
-    pred_class <- predict(model, newdata = test_data, type = "class")
-    
-    # Generate probability predictions
-    pred_prob_matrix <- predict(model, newdata = test_data, type = "prob")
-    # Create a data frame with appropriate column names
-    pred_prob <- as.data.frame(pred_prob_matrix)
-  } else {
-    stop("Unknown model type. Cannot generate predictions.")
+    # Generate predictions using randomForest's predict
+    pred_class <- predict(model, newdata = test_df, type = "class")
+    pred_prob <- predict(model, newdata = test_df, type = "prob")
   }
   
-  # Extract probability for the positive class (assuming "Good" is positive)
-  if("Good" %in% colnames(pred_prob)) {
-    pos_class_prob <- pred_prob[, "Good"]
-  } else {
-    # If "Good" not found, use second column (typically the positive class in binary)
-    pos_class_prob <- pred_prob[, 2]
-    message("Used second probability column as positive class")
-  }
+  # Extract probability for positive class
+  pos_class_prob <- pred_prob[, "Good"]
   
   message("Generated predictions for ", length(pred_class), " test samples")
   
@@ -386,13 +387,22 @@ evaluate_random_forest <- function(predictions, actual, model, prepared_data = N
   if(requireNamespace("pdp", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) {
     message("Generating partial dependence plots for top predictors...")
     
-    # Get top 6 important variables
+    # Get top 6 important variables, strip factor level indicators
     if(inherits(model, "train") && inherits(model$finalModel, "randomForest")) {
       var_imp <- randomForest::importance(model$finalModel)
       if("MeanDecreaseGini" %in% colnames(var_imp)) {
-        top_vars <- names(sort(var_imp[, "MeanDecreaseGini"], decreasing = TRUE)[1:6])
+        # Strip factor level indicators (e.g., "checking_statusA14" -> "checking_status")
+        clean_names <- gsub("([A-Za-z_]+).*", "\\1", rownames(var_imp))
+        var_imp_clean <- aggregate(var_imp[, "MeanDecreaseGini"], 
+                                 by = list(Variable = clean_names), 
+                                 FUN = sum)
+        top_vars <- var_imp_clean$Variable[order(var_imp_clean$x, decreasing = TRUE)][1:6]
       } else {
-        top_vars <- names(sort(var_imp[, 1], decreasing = TRUE)[1:6])
+        clean_names <- gsub("([A-Za-z_]+).*", "\\1", rownames(var_imp))
+        var_imp_clean <- aggregate(var_imp[, 1], 
+                                 by = list(Variable = clean_names), 
+                                 FUN = sum)
+        top_vars <- var_imp_clean$Variable[order(var_imp_clean$x, decreasing = TRUE)][1:6]
       }
     } else if(inherits(model, "randomForest")) {
       var_imp <- randomForest::importance(model)
@@ -434,14 +444,17 @@ evaluate_random_forest <- function(predictions, actual, model, prepared_data = N
         pdp_result <- pdp::partial(
           model, 
           pred.var = var, 
-          train = pdp_data,  # Use prepared data
+          train = pdp_data,
           prob = TRUE,
           plot = FALSE,
-          which.class = 2  # For the positive class probability
+          which.class = 2
         )
         
-        # Plot with ggplot2
-        pdp_plot <- ggplot2::ggplot(pdp_result, ggplot2::aes(x = pdp_result[[1]], y = yhat)) +
+        # Convert to data frame if not already
+        pdp_df <- as.data.frame(pdp_result)
+        
+        # Plot with ggplot2 using proper data reference
+        pdp_plot <- ggplot2::ggplot(pdp_df, ggplot2::aes(x = .data[[var]], y = .data[["yhat"]])) +
           ggplot2::geom_line(color = "blue", size = 1) +
           ggplot2::geom_point(color = "blue", size = 2) +
           ggplot2::labs(

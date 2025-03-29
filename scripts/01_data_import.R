@@ -235,16 +235,22 @@ plot_class_distribution <- function(data, output_dir = "results/figures/eda") {
     message(paste("Created directory:", output_dir))
   }
   
+  # Convert class to factor before plotting
+  plot_data <- data
+  plot_data$class <- as.factor(plot_data$class)
+  
   # Create class distribution plot
-  class_plot <- ggplot2::ggplot(data, ggplot2::aes(x = class, fill = class)) +
+  class_plot <- ggplot2::ggplot(plot_data, ggplot2::aes(x = class, fill = class)) +
     ggplot2::geom_bar() +
     ggplot2::labs(
       title = "Class Distribution in German Credit Dataset",
-      x = "Credit Risk",
+      x = "Credit Risk (1=Good, 2=Bad)",
       y = "Count"
     ) +
     ggplot2::theme_minimal() +
-    ggplot2::scale_fill_manual(values = c("1" = "green", "2" = "red"))
+    ggplot2::scale_fill_manual(values = c("1" = "green", "2" = "red"),
+                              labels = c("1" = "Good", "2" = "Bad"),
+                              name = "Credit Risk")
   
   # Save the plot
   plot_path <- file.path(output_dir, "class_distribution.png")

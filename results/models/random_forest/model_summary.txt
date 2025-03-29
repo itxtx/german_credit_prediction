@@ -3,35 +3,39 @@
 Date:  2025-03-29 
 
 PERFORMANCE METRICS:
-Accuracy: 0.6633
-Precision: 0.8609
-Recall: 0.619
-F1: 0.7202
-Auc: 0.7712
+Accuracy: 0.6667
+Precision: 0.8618
+Recall: 0.6238
+F1: 0.7238
+Auc: 0.7743
 
 CONFUSION MATRIX:
           Reference
 Prediction Bad Good
-      Bad   69   80
-      Good  21  130
+      Bad   69   79
+      Good  21  131
 
 DETAILED STATISTICS:
-         Sensitivity          Specificity       Pos Pred Value       Neg Pred Value 
-           0.6190476            0.7666667            0.8609272            0.4630872 
-           Precision               Recall                   F1           Prevalence 
-           0.8609272            0.6190476            0.7202216            0.7000000 
-      Detection Rate Detection Prevalence    Balanced Accuracy 
-           0.4333333            0.5033333            0.6928571 
+         Sensitivity          Specificity       Pos Pred Value 
+           0.6238095            0.7666667            0.8618421 
+      Neg Pred Value            Precision               Recall 
+           0.4662162            0.8618421            0.6238095 
+                  F1           Prevalence       Detection Rate 
+           0.7237569            0.7000000            0.4366667 
+Detection Prevalence    Balanced Accuracy 
+           0.5066667            0.6952381 
 
 MODEL PARAMETERS:
-Best mtry:  7 
+Best mtry:  4 
 Number of Trees:  500 
-OOB Error Rate:  0.302381 
+OOB Error Rate:  0.2785714 
 
 TOP 10 VARIABLES BY IMPORTANCE:
-    checking_statusA14          credit_amount   age_employment_ratio        monthly_payment 
-             20.022621              18.214807              16.682973              16.222392 
-              duration                    age       employment_years installment_commitment 
-             16.085789              13.818301               6.244754               5.879985 
-       residence_since      savings_statusA65 
-              5.101179               4.459514 
+    checking_statusA14          credit_amount               duration 
+             16.361207              15.650481              14.612730 
+  age_employment_ratio        monthly_payment                    age 
+             14.467514              13.663984              11.642266 
+installment_commitment       employment_years        residence_since 
+              6.250406               5.879215               5.201710 
+     credit_historyA34 
+              4.471505 

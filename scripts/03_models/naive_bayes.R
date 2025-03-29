@@ -15,6 +15,32 @@ if(!exists("train_data") || !exists("test_data")) {
   source("scripts/02_data_preprocessing.R")
 }
 
+# Function to create binned features
+create_bins <- function(data) {
+  # Create a copy to avoid modifying the original
+  binned_data <- data
+  
+  # Define bins for duration
+  duration_breaks <- c(0, 12, 24, 36, 48, 60, Inf)
+  duration_labels <- c("0-12", "12-24", "24-36", "36-48", "48-60", "60+")
+  
+  # Apply duration binning
+  binned_data$duration_bin <- cut(binned_data$duration, 
+                                 breaks = duration_breaks,
+                                 labels = duration_labels)
+  
+  # Define bins for credit_amount
+  amount_breaks <- c(0, 1000, 2000, 5000, 10000, Inf)
+  amount_labels <- c("0-1K", "1K-2K", "2K-5K", "5K-10K", "10K+")
+  
+  # Apply credit_amount binning
+  binned_data$credit_amount_bin <- cut(binned_data$credit_amount, 
+                                      breaks = amount_breaks,
+                                      labels = amount_labels)
+  
+  return(binned_data)
+}
+
 # Function to prepare data specifically for naive Bayes
 prepare_for_naive_bayes <- function(train_data, test_data) {
   message("\n=== Preparing Data for Naive Bayes ===")
@@ -23,10 +49,12 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   train_nb <- train_data
   test_nb <- test_data
   
-  # For naive Bayes, we should:
-  # 1. Ensure all categorical variables are properly factorized
-  # 2. Avoid transformations that might affect probability distributions
-  # 3. Discretize continuous variables if needed (optional)
+  # Apply binning to both training and test data
+  train_nb <- create_bins(train_nb)
+  test_nb <- create_bins(test_nb)
+  
+  # Store original feature information
+  feature_info <- list()
   
   # Ensure all categorical variables are factors
   factor_cols <- names(train_nb)[sapply(train_nb, is.character)]
@@ -34,63 +62,31 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
     message("Converting character columns to factors...")
     for(col in factor_cols) {
       train_nb[[col]] <- as.factor(train_nb[[col]])
-      test_nb[[col]] <- as.factor(test_nb[[col]])
+      if(col %in% names(test_nb)) {
+        test_nb[[col]] <- as.factor(test_nb[[col]])
+      }
     }
   }
   
-  # Align factor levels between training and test sets
+  # Process all factor columns and store their levels
   factor_cols <- names(train_nb)[sapply(train_nb, is.factor)]
   for(col in factor_cols) {
-    # Get all levels from both datasets
-    all_levels <- unique(c(levels(train_nb[[col]]), levels(test_nb[[col]])))
-    
-    # Set the levels for both datasets
-    levels(train_nb[[col]]) <- all_levels
-    levels(test_nb[[col]]) <- all_levels
+    if(col %in% names(test_nb)) {
+      # Get all levels from both datasets
+      all_levels <- unique(c(levels(train_nb[[col]]), levels(test_nb[[col]])))
+      
+      # Store levels for later use
+      feature_info[[col]] <- all_levels
+      
+      # Set the levels for both datasets
+      train_nb[[col]] <- factor(train_nb[[col]], levels = all_levels)
+      test_nb[[col]] <- factor(test_nb[[col]], levels = all_levels)
+    }
   }
   
-  # Naive Bayes performs better when continuous variables are discretized (optional)
-  # Here we'll check if discretization might be beneficial
+  # Store numeric column names
   numeric_cols <- names(train_nb)[sapply(train_nb, is.numeric)]
-  if(length(numeric_cols) > 0) {
-    message("Found ", length(numeric_cols), " numeric columns that could potentially be discretized")
-    
-    # For demonstration, we'll discretize one of the most important numeric variables: duration
-    if("duration" %in% numeric_cols) {
-      message("Discretizing 'duration' into bins...")
-      
-      # Define bins for duration
-      duration_breaks <- c(0, 12, 24, 36, 48, 60, Inf)
-      duration_labels <- c("0-12", "12-24", "24-36", "36-48", "48-60", "60+")
-      
-      # Apply discretization
-      train_nb$duration_bin <- cut(train_nb$duration, 
-                                  breaks = duration_breaks,
-                                  labels = duration_labels)
-      test_nb$duration_bin <- cut(test_nb$duration, 
-                                 breaks = duration_breaks,
-                                 labels = duration_labels)
-      
-      # Note: We're keeping the original duration as well
-    }
-    
-    # Similarly for credit_amount
-    if("credit_amount" %in% numeric_cols) {
-      message("Discretizing 'credit_amount' into bins...")
-      
-      # Define bins for credit_amount
-      amount_breaks <- c(0, 1000, 2000, 5000, 10000, Inf)
-      amount_labels <- c("0-1K", "1K-2K", "2K-5K", "5K-10K", "10K+")
-      
-      # Apply discretization
-      train_nb$credit_amount_bin <- cut(train_nb$credit_amount, 
-                                      breaks = amount_breaks,
-                                      labels = amount_labels)
-      test_nb$credit_amount_bin <- cut(test_nb$credit_amount, 
-                                     breaks = amount_breaks,
-                                     labels = amount_labels)
-    }
-  }
+  feature_info[["numeric_cols"]] <- numeric_cols
   
   # Create a formula that includes all predictors except the class
   predictors <- setdiff(names(train_nb), "class")
@@ -102,7 +98,8 @@ prepare_for_naive_bayes <- function(train_data, test_data) {
   return(list(
     train = train_nb,
     test = test_nb,
-    formula = model_formula
+    formula = model_formula,
+    feature_info = feature_info
   ))
 }
 
@@ -117,100 +114,66 @@ train_naive_bayes <- function(prepared_data, k_folds = 5, seed_value = 123) {
   train_data <- prepared_data$train
   model_formula <- prepared_data$formula
   
-  # Set up cross-validation
-  ctrl <- trainControl(
-    method = "cv",            # Cross-validation
-    number = k_folds,         # Number of folds
-    classProbs = TRUE,        # Calculate class probabilities
-    summaryFunction = twoClassSummary,  # Use ROC summary
-    savePredictions = "final" # Save final predictions
+  # Add check for missing values before training
+  train_data <- na.omit(train_data)  # Remove any rows with missing values
+  
+  # Now train the model with Laplace smoothing
+  nb_model <- naive_bayes(
+    formula = model_formula,
+    data = train_data,
+    laplace = 1  # Add Laplace smoothing
   )
   
-  # Train the model with error handling
-  tryCatch({
-    message("Training naive Bayes model...")
-    
-    # Start timing
-    start_time <- proc.time()
-    
-    # Check if e1071 is available
-    if(!requireNamespace("e1071", quietly = TRUE)) {
-      message("Installing e1071 package...")
-      install.packages("e1071", repos = "https://cloud.r-project.org")
-    }
-    
-    # Train the model
-    nb_model <- train(
-      model_formula, 
-      data = train_data,
-      method = "naive_bayes",
-      trControl = ctrl,
-      metric = "ROC",
-      tuneLength = 5,         # Try 5 different Laplace smoothing values
-      preProcess = NULL       # No preprocessing needed for Naive Bayes
-    )
-    
-    # End timing
-    end_time <- proc.time()
-    train_time <- end_time - start_time
-    
-    message("Model training completed in ", round(train_time[3], 2), " seconds")
-    
-    # Print model summary
-    message("\nModel Summary:")
-    print(nb_model)
-    
-    # Print cross-validation results
-    message("\nCross-Validation Results:")
-    print(nb_model$results)
-    
-    # Print best tuning parameters
-    message("\nBest Tuning Parameters:")
-    print(nb_model$bestTune)
-    
-    return(nb_model)
-    
-  }, error = function(e) {
-    message("ERROR training naive Bayes: ", e$message)
-    
-    # Try with a simpler formula if the original fails
-    message("Attempting with a simplified model...")
-    
-    # Create a simpler formula with fewer predictors
-    simple_formula <- as.formula("class ~ checking_status + duration + credit_history + purpose + credit_amount")
-    
-    # Train a simpler model
-    simple_model <- train(
-      simple_formula, 
-      data = train_data,
-      method = "naive_bayes",
-      trControl = ctrl,
-      metric = "ROC"
-    )
-    
-    message("Simplified model training completed")
-    return(simple_model)
-  })
+  # Store feature information in the model
+  nb_model$feature_info <- prepared_data$feature_info
+  
+  return(nb_model)
 }
 
 # Function to generate predictions using the trained model
 generate_predictions <- function(model, test_data) {
   message("\n=== Generating Predictions ===")
   
-  # Generate class predictions
-  pred_class <- predict(model, newdata = test_data)
+  # First apply binning to test data
+  test_subset <- create_bins(test_data)
   
-  # Generate probability predictions
-  pred_prob <- predict(model, newdata = test_data, type = "prob")
-  
-  # Extract probability for the positive class (assuming "Good" is positive)
-  if("Good" %in% colnames(pred_prob)) {
-    pos_class_prob <- pred_prob[, "Good"]
-  } else {
-    # If "Good" not found, use second column (typically the positive class in binary)
-    pos_class_prob <- pred_prob[, 2]
-    message("Used second probability column as positive class")
+  # Get the feature information stored during training
+  feature_info <- model$feature_info
+  if(is.null(feature_info)) {
+    stop("Model is missing feature information. Please retrain the model.")
   }
+  
+  # Ensure test data has exactly the same features as training data
+  model_features <- names(model$tables)
+  
+  # Process each feature according to its type
+  for(col in model_features) {
+    if(col %in% names(feature_info)) {  # If it's a factor column
+      if(!col %in% names(test_subset)) {
+        stop(paste("Missing required feature in test data:", col))
+      }
+      
+      # Convert to factor with exactly the same levels as in training
+      test_subset[[col]] <- factor(test_subset[[col]], 
+                                  levels = feature_info[[col]])
+      
+      message("Aligned levels for feature: ", col)
+    } else if(col %in% feature_info$numeric_cols) {  # If it's a numeric column
+      if(!is.numeric(test_subset[[col]])) {
+        test_subset[[col]] <- as.numeric(as.character(test_subset[[col]]))
+      }
+    }
+  }
+  
+  # Keep only the features used in the model
+  test_subset <- test_subset[, model_features, drop = FALSE]
+  
+  # Generate predictions
+  pred_class <- predict(model, newdata = test_subset, type = "class")
+  pred_prob <- predict(model, newdata = test_subset, type = "prob")
+  
+  # Extract probability for positive class
+  pos_class_prob <- pred_prob[, "Good"]
   
   message("Generated predictions for ", length(pred_class), " test samples")
   

@@ -494,38 +494,36 @@ extract_variable_importance <- function(model, top_n = 10, model_type = NULL) {
 }
 
 # Function to plot variable importance
-plot_variable_importance <- function(importance_df, title = "Feature Importance", max_vars = 20) {
-  # Ensure the input data frame has the correct structure
-  if (!all(c("Feature", "Gain") %in% colnames(importance_df))) {
+plot_variable_importance <- function(var_imp_df, title = "Variable Importance", max_vars = NULL) {
+  # Ensure the required columns exist
+  if (!all(c("Feature", "Gain") %in% colnames(var_imp_df))) {
     stop("importance_df must have 'Feature' and 'Gain' columns")
   }
   
-  # Ensure the data frame is not empty
-  if (nrow(importance_df) == 0) {
-    warning("Empty importance data frame - no plot generated")
-    return(NULL)
+  # Sort by importance
+  var_imp_df <- var_imp_df[order(var_imp_df$Gain, decreasing = TRUE), ]
+  
+  # Limit number of variables if specified
+  if (!is.null(max_vars)) {
+    var_imp_df <- head(var_imp_df, max_vars)
   }
   
-  # Sort by importance and take top max_vars
-  plot_df <- importance_df %>%
-    arrange(desc(Gain)) %>%
-    slice_head(n = max_vars)
-  
   # Create the plot
-  ggplot(plot_df, aes(x = reorder(Feature, Gain), y = Gain)) +
-    geom_bar(stat = "identity", fill = "steelblue") +
-    coord_flip() +
-    labs(
+  plot <- ggplot2::ggplot(var_imp_df, ggplot2::aes(x = reorder(Feature, Gain), y = Gain)) +
+    ggplot2::geom_bar(stat = "identity", fill = "steelblue") +
+    ggplot2::coord_flip() +
+    ggplot2::theme_minimal() +
+    ggplot2::labs(
       title = title,
       x = "Features",
-      y = "Importance (Gain)"
+      y = "Importance"
     ) +
-    theme_minimal() +
-    theme(
-      plot.title = element_text(size = 14, face = "bold"),
-      axis.text = element_text(size = 10),
-      axis.title = element_text(size = 12)
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(hjust = 0.5),
+      axis.text.y = ggplot2::element_text(size = 8)
     )
+  
+  return(plot)
 }
 
 # Function to calculate lift and gain

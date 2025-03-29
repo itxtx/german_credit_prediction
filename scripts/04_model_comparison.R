@@ -30,8 +30,18 @@ load_model_results <- function(model_names = model_list) {
   # Load results for each model
   for(model_name in model_names) {
     model_dir <- file.path("results/models", model_name)
-    model_file <- file.path(model_dir, paste0(gsub("_", "_", model_name), "_model.rds"))
+    
+    # Adjust model filename based on model type
+    model_file <- if(model_name == "logistic_regression") {
+      file.path(model_dir, "logistic_model.rds")
+    } else {
+      file.path(model_dir, paste0(model_name, "_model.rds"))
+    }
     perf_file <- file.path(model_dir, "performance_metrics.RData")
+    
+    # Add debug messages
+    message("Looking for model file: ", model_file)
+    message("Looking for performance file: ", perf_file)
     
     # Check if files exist
     if(file.exists(model_file) && file.exists(perf_file)) {
@@ -160,10 +170,14 @@ visualize_model_comparison <- function(comparison_table, output_dir = "results/m
     message("Created directory: ", output_dir)
   }
   
-  # Check if ggplot2 is available
-  if(!requireNamespace("ggplot2", quietly = TRUE)) {
-    message("ggplot2 package not available. Skipping visualizations...")
-    return(NULL)
+  # Install and load required packages if not available
+  required_packages <- c("ggplot2", "tidyr", "fmsb")
+  for(pkg in required_packages) {
+    if(!requireNamespace(pkg, quietly = TRUE)) {
+      message("Installing package: ", pkg)
+      install.packages(pkg, repos = "https://cloud.r-project.org")
+    }
+    library(pkg, character.only = TRUE)
   }
   
   # Get metrics columns (exclude _best columns)
@@ -211,16 +225,18 @@ visualize_model_comparison <- function(comparison_table, output_dir = "results/m
   # 2. Create summary bar chart with all metrics
   # Reshape data for plotting
   if(requireNamespace("tidyr", quietly = TRUE)) {
-    # Use tidyr to reshape data
+    # Use tidyr to reshape data with updated syntax
     long_data <- tidyr::pivot_longer(
-      comparison_table[, c("Model", metrics)],
-      cols = metrics,
+      comparison_table,
+      cols = all_of(metrics),  # Use all_of() for external vectors
       names_to = "Metric",
       values_to = "Value"
     )
     
-    # Create plot
-    plot <- ggplot2::ggplot(long_data, ggplot2::aes(x = Model, y = Value, fill = Metric)) +
+    # Create plot with explicit column names
+    plot <- ggplot2::ggplot(long_data, ggplot2::aes(x = .data[["Model"]], 
+                                                    y = .data[["Value"]], 
+                                                    fill = .data[["Metric"]])) +
       ggplot2::geom_bar(stat = "identity", position = "dodge") +
       ggplot2::labs(
         title = "Model Comparison across All Metrics",
@@ -325,6 +341,39 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
   for(model_name in names(all_results)) {
     # Get model
     model_result <- all_results[[model_name]]
+    
+    # Special handling for naive bayes
+    if(model_name == "naive_bayes") {
+      # Load the naive bayes preprocessing function
+      source("scripts/03_models/naive_bayes.R")
+      
+      # Preprocess test data to match training data format
+      test_data <- tryCatch({
+        # Assuming prepare_data() function exists in naive_bayes.R
+        prepared_test <- prepare_data(test_data)
+        
+        # Create bins if missing
+        if(!"duration_bin" %in% names(prepared_test)) {
+          prepared_test$duration_bin <- cut(prepared_test$duration, 
+                                          breaks = c(0, 12, 24, 36, 48, Inf),
+                                          labels = c("0-12", "13-24", "25-36", "37-48", "48+"))
+        }
+        if(!"credit_amount_bin" %in% names(prepared_test)) {
+          prepared_test$credit_amount_bin <- cut(prepared_test$credit_amount,
+                                               breaks = c(0, 5000, 10000, 15000, Inf),
+                                               labels = c("0-5k", "5k-10k", "10k-15k", "15k+"))
+        }
+        prepared_test
+      }, error = function(e) {
+        message("ERROR: Could not prepare test data for naive_bayes: ", e$message)
+        return(NULL)
+      })
+      
+      if(is.null(test_data)) {
+        message("WARNING: Skipping naive_bayes due to data preparation error")
+        next
+      }
+    }
     
     # Skip if model not available
     if(is.null(model_result$model)) {
@@ -749,4 +798,41 @@ if(!exists("MODEL_COMPARISON_SOURCED") || !MODEL_COMPARISON_SOURCED) {
   MODEL_COMPARISON_SOURCED <- TRUE
 } else {
   message("04_model_comparison.R has been sourced. Use run_model_comparison() to compare models.")
+}
+
+# Update the comparison metrics function
+comparison_metrics <- function(data, metrics) {
+  # Use base R subsetting instead of tidyselect
+  data[, metrics, drop = FALSE]
+}
+
+# Update the compare_models function
+compare_models <- function(results_list, metrics) {
+  # Use base R operations instead of tidyselect
+  comparison_table <- do.call(rbind, results_list)
+  comparison_table$Model <- rownames(comparison_table)
+  rownames(comparison_table) <- NULL
+  
+  # Select columns and sort
+  result <- comparison_table[, c("Model", metrics)]
+  result <- result[order(result$accuracy, decreasing = TRUE), ]
+  
+  return(result)
+}
+
+# Update evaluate_performance function
+evaluate_performance <- function(predictions, actual_values, metrics) {
+  results <- data.frame(
+    actual = actual_values,
+    predicted = predictions
+  )
+  
+  # Add metrics columns if needed
+  for(metric in metrics) {
+    if(!(metric %in% names(results))) {
+      results[[metric]] <- NA
+    }
+  }
+  
+  return(results)
 }

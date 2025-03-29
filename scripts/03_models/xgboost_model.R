@@ -15,6 +15,9 @@ if(!exists("train_data") || !exists("test_data")) {
   source("scripts/02_data_preprocessing.R")
 }
 
+library(xgboost)
+library(caret)
+
 # Function to prepare data specifically for XGBoost
 prepare_for_xgboost <- function(train_data, test_data) {
   message("\n=== Preparing Data for XGBoost ===")
@@ -260,26 +263,18 @@ train_xgboost_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
 }
 
 # Function to generate predictions using the trained model
-generate_predictions <- function(model, test_matrix) {
-  message("\n=== Generating Predictions ===")
+generate_predictions <- function(model, test_data) {
+  # Prepare test data
+  test_prepared <- prepare_for_xgboost(test_data)
   
-  # Create DMatrix for prediction
-  dtest <- xgb.DMatrix(data = test_matrix)
-  
-  # Generate probability predictions
-  pred_prob <- predict(model, newdata = dtest)
-  
-  # Generate class predictions (threshold = 0.5)
+  # Generate predictions
+  pred_prob <- predict(model, test_prepared$data)
   pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")
-  
-  # Convert to factor with proper levels
-  pred_class <- factor(pred_class, levels = c("Bad", "Good"))
-  
-  message("Generated predictions for ", length(pred_class), " test samples")
   
   return(list(
     class = pred_class,
-    prob = pred_prob
+    prob = pred_prob,
+    all_probs = data.frame(Bad = 1 - pred_prob, Good = pred_prob)
   ))
 }
 
@@ -436,13 +431,17 @@ plot_shap_values <- function(model, test_matrix, output_dir = "results/models/xg
     # Convert test_matrix to DMatrix
     dtest <- xgboost::xgb.DMatrix(test_matrix)
     
+    # Get feature names from the model
+    feature_names <- model$feature_names
+    
+    # Ensure test_matrix has the same number of columns as feature names
+    if(ncol(test_matrix) != length(feature_names)) {
+      stop(sprintf("Mismatch in dimensions: test_matrix has %d columns but there are %d feature names", 
+                  ncol(test_matrix), length(feature_names)))
+    }
+    
     # Compute SHAP values using xgboost's predict function
-    shap_values <- xgboost::xgb.model.dt.tree(
-      feature_names = model$feature_names,
-      model = model,
-      input_data = dtest,
-      type = "contributions"
-    )
+    shap_values <- xgboost::predict(model, dtest, predcontrib = TRUE)
     
     # Take a sample of records to visualize (to avoid cluttered plots)
     set.seed(123)
@@ -450,15 +449,15 @@ plot_shap_values <- function(model, test_matrix, output_dir = "results/models/xg
     sample_idx <- sample(1:nrow(test_matrix), sample_size)
     
     # Get top 10 most important features for plotting
-    importance <- xgboost::xgb.importance(feature_names = model$feature_names, model = model)
+    importance <- xgboost::xgb.importance(feature_names = feature_names, model = model)
     top_features <- head(importance$Feature, 10)
     
     # Create summary plot for SHAP values
     shap_df <- data.frame(
-      Feature = rep(model$feature_names, each = sample_size),
-      SHAP_Value = as.vector(shap_values[sample_idx, 1:length(model$feature_names)]),
-      Feature_Value = as.vector(sapply(model$feature_names, function(f) {
-        col_idx <- which(model$feature_names == f)
+      Feature = rep(feature_names, each = sample_size),
+      SHAP_Value = as.vector(shap_values[sample_idx, 1:length(feature_names)]),
+      Feature_Value = as.vector(sapply(feature_names, function(f) {
+        col_idx <- which(feature_names == f)
         return(test_matrix[sample_idx, col_idx])
       }))
     )
@@ -541,7 +540,7 @@ run_xgboost <- function(train_data, test_data, k_folds = 5, seed_value = 123) {
   xgb_model <- train_xgboost_model(prepared_data, k_folds, seed_value)
   
   # Step 3: Generate predictions
-  predictions <- generate_predictions(xgb_model, prepared_data$test_matrix)
+  predictions <- generate_predictions(xgb_model, test_data)
   
   # Step 4: Evaluate model performance
   performance <- evaluate_xgboost(predictions, prepared_data$test_label, xgb_model)
@@ -576,4 +575,46 @@ if(!exists("XGBOOST_SOURCED") || !XGBOOST_SOURCED) {
   XGBOOST_SOURCED <- TRUE
 } else {
   message("xgboost_model.R has been sourced. Use run_xgboost() to train and evaluate the model.")
+}
+
+# Prepare data for XGBoost
+prepare_xgb_data <- function(data) {
+  # Convert factors to dummy variables
+  dummies <- model.matrix(~.-1, data[, !names(data) %in% "class", drop = FALSE])
+  
+  # Convert class to numeric (0/1)
+  labels <- as.numeric(data$class) - 1
+  
+  return(list(data = dummies, label = labels))
+}
+
+# Train XGBoost model
+train_xgb <- function(train_data) {
+  prepared_data <- prepare_xgb_data(train_data)
+  
+  xgb_params <- list(
+    objective = "binary:logistic",
+    eval_metric = "auc",
+    eta = 0.1,
+    max_depth = 6,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  
+  xgb_model <- xgboost(
+    data = prepared_data$data,
+    label = prepared_data$label,
+    params = xgb_params,
+    nrounds = 100,
+    verbose = 0
+  )
+  
+  return(xgb_model)
+}
+
+# Generate predictions
+predict_xgb <- function(model, test_data) {
+  prepared_test <- prepare_xgb_data(test_data)
+  predictions <- predict(model, prepared_test$data)
+  return(predictions)
 }

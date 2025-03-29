@@ -16,9 +16,11 @@ Prediction Bad Good
       Good  25  133
 
 DETAILED STATISTICS:
-         Sensitivity          Specificity       Pos Pred Value       Neg Pred Value 
-           0.6333333            0.7222222            0.8417722            0.4577465 
-           Precision               Recall                   F1           Prevalence 
-           0.8417722            0.6333333            0.7228261            0.7000000 
-      Detection Rate Detection Prevalence    Balanced Accuracy 
-           0.4433333            0.5266667            0.6777778 
+         Sensitivity          Specificity       Pos Pred Value 
+           0.6333333            0.7222222            0.8417722 
+      Neg Pred Value            Precision               Recall 
+           0.4577465            0.8417722            0.6333333 
+                  F1           Prevalence       Detection Rate 
+           0.7228261            0.7000000            0.4433333 
+Detection Prevalence    Balanced Accuracy 
+           0.5266667            0.6777778 

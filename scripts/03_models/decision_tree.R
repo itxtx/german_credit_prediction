@@ -203,7 +203,7 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
   # Print performance metrics
   message("\nPerformance Metrics:")
   metrics <- c("accuracy", "precision", "recall", "f1", "auc")
-  for(metric in metrics) {
+  for(metric in all_of(metrics)) {
     if(!is.null(performance[[metric]])) {
       message(paste0(toupper(substring(metric, 1, 1)), substring(metric, 2), ": ", 
                     round(performance[[metric]], 4)))
@@ -253,6 +253,9 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
         )
         var_imp_df <- var_imp_df[order(var_imp_df$Importance, decreasing = TRUE), ]
         
+        # Rename columns to match expected format
+        names(var_imp_df) <- c("Feature", "Gain")
+        
         # Create and save the plot
         importance_plot <- plot_variable_importance(
           var_imp_df,
@@ -276,6 +279,9 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
           Importance = as.numeric(var_imp)
         )
         var_imp_df <- var_imp_df[order(var_imp_df$Importance, decreasing = TRUE), ]
+        
+        # Rename columns to match expected format
+        names(var_imp_df) <- c("Feature", "Gain")
         
         # Create and save the plot
         importance_plot <- plot_variable_importance(
@@ -306,7 +312,7 @@ evaluate_decision_tree <- function(predictions, actual, model, output_dir = "res
   cat("Date: ", as.character(Sys.Date()), "\n\n")
   
   cat("PERFORMANCE METRICS:\n")
-  for(metric in metrics) {
+  for(metric in all_of(metrics)) {
     if(!is.null(performance[[metric]])) {
       cat(paste0(toupper(substring(metric, 1, 1)), substring(metric, 2), ": ", 
                 round(performance[[metric]], 4), "\n"))
