@@ -448,5 +448,25 @@ create_bins <- function(data) {
                                labels = c("0-5k", "5k-10k", "10k-15k", "15k+"),
                                include.lowest = TRUE)
   
+  # Check for NAs and log warnings
+  na_counts <- list(
+    duration_bin = sum(is.na(data$duration_bin)),
+    credit_amount_bin = sum(is.na(data$credit_amount_bin))
+  )
+  
+  if(any(unlist(na_counts) > 0)) {
+    warning("NAs found in binned features:\n",
+            "duration_bin: ", na_counts$duration_bin, "\n",
+            "credit_amount_bin: ", na_counts$credit_amount_bin)
+    
+    # Fill NAs with a new category
+    data$duration_bin[is.na(data$duration_bin)] <- "unknown"
+    data$credit_amount_bin[is.na(data$credit_amount_bin)] <- "unknown"
+    
+    # Convert back to factors with new level
+    data$duration_bin <- factor(data$duration_bin)
+    data$credit_amount_bin <- factor(data$credit_amount_bin)
+  }
+  
   return(data)
 }

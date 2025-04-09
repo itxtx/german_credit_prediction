@@ -23,6 +23,12 @@ prepare_for_svm <- function(train_data, test_data) {
   train_svm <- train_data
   test_svm <- test_data
   
+  # Store original column names and dummy variables info
+  feature_info <- list(
+    original_cols = names(train_svm),
+    dummy_cols = list()
+  )
+  
   # For SVM, we need:
   # 1. Scale all numeric features (essential for SVM)
   # 2. Convert categorical variables to numeric (one-hot encoding)
@@ -41,13 +47,13 @@ prepare_for_svm <- function(train_data, test_data) {
         sd = sd(train_svm[[col]], na.rm = TRUE)
       )
       
-      # Apply scaling to training data
-      train_svm[[col]] <- (train_svm[[col]] - scaling_params[[col]]$mean) / 
-                          scaling_params[[col]]$sd
-      
-      # Apply same scaling to test data
-      test_svm[[col]] <- (test_svm[[col]] - scaling_params[[col]]$mean) / 
-                          scaling_params[[col]]$sd
+      # Apply scaling
+      train_svm[[col]] <- scale(train_svm[[col]], 
+                               center = scaling_params[[col]]$mean,
+                               scale = scaling_params[[col]]$sd)
+      test_svm[[col]] <- scale(test_svm[[col]], 
+                              center = scaling_params[[col]]$mean,
+                              scale = scaling_params[[col]]$sd)
     }
   }
   
@@ -58,17 +64,26 @@ prepare_for_svm <- function(train_data, test_data) {
   if(length(factor_cols) > 0) {
     message("One-hot encoding ", length(factor_cols), " categorical variables...")
     
+    # Store dummy columns for each factor
     for(col in factor_cols) {
-      # Ensure test data has same levels as train data
-      test_svm[[col]] <- factor(test_svm[[col]], levels = levels(train_svm[[col]]))
+      # Get all possible levels from both datasets
+      all_levels <- unique(c(levels(train_svm[[col]]), levels(test_svm[[col]])))
+      
+      # Update factor levels in both datasets
+      train_svm[[col]] <- factor(train_svm[[col]], levels = all_levels)
+      test_svm[[col]] <- factor(test_svm[[col]], levels = all_levels)
       
       # Create dummy variables
       train_matrix <- model.matrix(~ get(col) - 1, data = train_svm)
       test_matrix <- model.matrix(~ get(col) - 1, data = test_svm)
       
       # Fix column names
-      colnames(train_matrix) <- gsub("^get\\(col\\)", col, colnames(train_matrix))
-      colnames(test_matrix) <- gsub("^get\\(col\\)", col, colnames(test_matrix))
+      col_names <- gsub("^get\\(col\\)", col, colnames(train_matrix))
+      colnames(train_matrix) <- col_names
+      colnames(test_matrix) <- col_names
+      
+      # Store dummy column names
+      feature_info$dummy_cols[[col]] <- col_names
       
       # Add to datasets
       train_svm <- cbind(train_svm, train_matrix)
@@ -80,16 +95,10 @@ prepare_for_svm <- function(train_data, test_data) {
     }
   }
   
-  # Step 3: Feature selection (optional for very high-dimensional data)
-  total_features <- ncol(train_svm) - 1  # Excluding class column
-  if(total_features > 100) {
-    message("High dimensional data detected (", total_features, " features). Consider feature selection.")
-    # Feature selection would be implemented here if needed
-  }
+  # Store final column names
+  feature_info$final_cols <- names(train_svm)
   
-  message("Data preparation completed: ", ncol(train_svm) - 1, " features after processing")
-  
-  # Create a formula that includes all predictors except the class
+  # Create formula excluding class
   predictors <- setdiff(names(train_svm), "class")
   formula_string <- paste("class ~", paste(predictors, collapse = " + "))
   model_formula <- as.formula(formula_string)
@@ -98,7 +107,8 @@ prepare_for_svm <- function(train_data, test_data) {
     train = train_svm,
     test = test_svm,
     formula = model_formula,
-    scaling_params = scaling_params
+    scaling_params = scaling_params,
+    feature_info = feature_info  # Add feature info to return value
   ))
 }
 
@@ -173,6 +183,9 @@ train_svm_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
     message("\nBest Tuning Parameters:")
     print(svm_model$bestTune)
     
+    # Store feature info in the model
+    attr(svm_model, "feature_info") <- prepared_data$feature_info
+    
     return(svm_model)
     
   }, error = function(e) {
@@ -204,17 +217,34 @@ train_svm_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
 generate_predictions <- function(model, test_data) {
   message("\n=== Generating Predictions ===")
   
+  # Get feature info from model
+  feature_info <- attr(model, "feature_info")
+  if(is.null(feature_info)) {
+    warning("No feature info found in model. Predictions may fail if features don't match.")
+  } else {
+    # Ensure test data has all required features
+    missing_cols <- setdiff(feature_info$final_cols, names(test_data))
+    if(length(missing_cols) > 0) {
+      message("Adding missing dummy columns with 0 values: ", 
+              paste(missing_cols, collapse = ", "))
+      for(col in missing_cols) {
+        test_data[[col]] <- 0
+      }
+    }
+    
+    # Ensure columns are in the same order as training
+    test_data <- test_data[, feature_info$final_cols]
+  }
+  
   # Generate predictions
   pred_class <- predict(model, test_data)
   
   # Handle different types of SVM models
-  if (inherits(model, "svm")) {
-    # e1071 svm model
+  if(inherits(model, "svm")) {
     pred_prob <- predict(model, test_data, probability = TRUE)
     prob_attr <- attr(pred_prob, "probabilities")
     pos_class_prob <- prob_attr[, "Good"]
-  } else if (inherits(model, "train")) {
-    # caret trained model
+  } else if(inherits(model, "train")) {
     pred_prob <- predict(model, test_data, type = "prob")
     pos_class_prob <- pred_prob[, "Good"]
   } else {
@@ -222,14 +252,10 @@ generate_predictions <- function(model, test_data) {
     pos_class_prob <- ifelse(pred_class == "Good", 0.75, 0.25)
   }
   
-  # Ensure probabilities are numeric and between 0 and 1
-  pos_class_prob <- as.numeric(pos_class_prob)
-  pos_class_prob <- pmin(pmax(pos_class_prob, 0), 1)
-  
   return(list(
     class = pred_class,
     prob = pos_class_prob,
-    all_probs = if (exists("prob_attr")) prob_attr else 
+    all_probs = if(exists("prob_attr")) prob_attr else 
                 data.frame(Bad = 1 - pos_class_prob, Good = pos_class_prob)
   ))
 }
