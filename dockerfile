@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
     cmake \
     libnlopt-dev \
     libgit2-dev \
+    pandoc \
+    pandoc-citeproc \
+    here \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,7 +22,8 @@ RUN apt-get update && apt-get install -y \
 RUN R -e "install.packages(c('readr', 'dplyr', 'tidyr', 'ggplot2', 'caret', 'rpart', 'rpart.plot', \
                             'randomForest', 'neuralnet', 'ROCR', 'pROC', 'e1071', \
                             'kernlab', 'MASS', 'recipes', 'xgboost', 'devtools', \
-                            'BiocManager', 'rmarkdown', 'knitr', 'naivebayes', 'fmsb', 'e1071'), \
+                            'BiocManager', 'rmarkdown', 'knitr', 'naivebayes', 'fmsb', 'e1071', \
+                            'pdp', 'vip', 'gridExtra'), \
                             repos='https://cloud.r-project.org/')"
 # Create directories for the project structure
 RUN mkdir -p /app/data/raw \

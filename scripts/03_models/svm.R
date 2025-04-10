@@ -29,10 +29,21 @@ prepare_for_svm <- function(train_data, test_data) {
     dummy_cols = list()
   )
   
-  # For SVM, we need:
-  # 1. Scale all numeric features (essential for SVM)
-  # 2. Convert categorical variables to numeric (one-hot encoding)
-  # 3. Consider dimensionality reduction for large datasets
+  # Ensure numeric columns are properly typed
+  numeric_cols <- c("duration", "credit_amount", "installment_commitment", 
+                   "residence_since", "age", "existing_credits", "num_dependents")
+  
+  for(col in numeric_cols) {
+    if(col %in% names(train_svm)) {
+      # Convert to numeric, handling any non-numeric values
+      train_svm[[col]] <- as.numeric(as.character(train_svm[[col]]))
+      test_svm[[col]] <- as.numeric(as.character(test_svm[[col]]))
+      
+      # Replace any NA values with 0
+      train_svm[[col]][is.na(train_svm[[col]])] <- 0
+      test_svm[[col]][is.na(test_svm[[col]])] <- 0
+    }
+  }
   
   # Step 1: Scale numeric features
   numeric_cols <- names(train_svm)[sapply(train_svm, is.numeric)]
@@ -54,6 +65,10 @@ prepare_for_svm <- function(train_data, test_data) {
       test_svm[[col]] <- scale(test_svm[[col]], 
                               center = scaling_params[[col]]$mean,
                               scale = scaling_params[[col]]$sd)
+      
+      # Convert scaled values to numeric (removes attributes)
+      train_svm[[col]] <- as.numeric(train_svm[[col]])
+      test_svm[[col]] <- as.numeric(test_svm[[col]])
     }
   }
   
@@ -63,6 +78,10 @@ prepare_for_svm <- function(train_data, test_data) {
   
   if(length(factor_cols) > 0) {
     message("One-hot encoding ", length(factor_cols), " categorical variables...")
+    
+    # Create empty data frames for the encoded data
+    train_encoded <- data.frame(row.names = 1:nrow(train_svm))
+    test_encoded <- data.frame(row.names = 1:nrow(test_svm))
     
     # Store dummy columns for each factor
     for(col in factor_cols) {
@@ -85,30 +104,44 @@ prepare_for_svm <- function(train_data, test_data) {
       # Store dummy column names
       feature_info$dummy_cols[[col]] <- col_names
       
-      # Add to datasets
-      train_svm <- cbind(train_svm, train_matrix)
-      test_svm <- cbind(test_svm, test_matrix)
-      
-      # Remove original column
-      train_svm[[col]] <- NULL
-      test_svm[[col]] <- NULL
+      # Add to encoded data frames
+      train_encoded <- cbind(train_encoded, as.data.frame(train_matrix))
+      test_encoded <- cbind(test_encoded, as.data.frame(test_matrix))
     }
+    
+    # Add numeric columns to encoded data frames
+    for(col in numeric_cols) {
+      train_encoded[[col]] <- train_svm[[col]]
+      test_encoded[[col]] <- test_svm[[col]]
+    }
+    
+    # Add class column
+    train_encoded$class <- train_svm$class
+    test_encoded$class <- test_svm$class
+    
+    # Update data frames
+    train_svm <- train_encoded
+    test_svm <- test_encoded
   }
   
   # Store final column names
   feature_info$final_cols <- names(train_svm)
+  feature_info$scaling_params <- scaling_params
   
-  # Create formula excluding class
-  predictors <- setdiff(names(train_svm), "class")
-  formula_string <- paste("class ~", paste(predictors, collapse = " + "))
-  model_formula <- as.formula(formula_string)
+  # Ensure all columns are in the same order
+  train_svm <- train_svm[, feature_info$final_cols]
+  test_svm <- test_svm[, feature_info$final_cols]
+  
+  # Ensure all numeric columns are properly typed
+  for(col in setdiff(names(train_svm), "class")) {
+    train_svm[[col]] <- as.numeric(train_svm[[col]])
+    test_svm[[col]] <- as.numeric(test_svm[[col]])
+  }
   
   return(list(
     train = train_svm,
     test = test_svm,
-    formula = model_formula,
-    scaling_params = scaling_params,
-    feature_info = feature_info  # Add feature info to return value
+    feature_info = feature_info
   ))
 }
 
@@ -124,93 +157,76 @@ train_svm_model <- function(prepared_data, k_folds = 5, seed_value = 123) {
   model_formula <- prepared_data$formula
   
   # Check if required packages are available
-  if(!requireNamespace("e1071", quietly = TRUE) || !requireNamespace("kernlab", quietly = TRUE)) {
+  if(!requireNamespace("e1071", quietly = TRUE)) {
     message("Installing required packages for SVM...")
-    install.packages(c("e1071", "kernlab"), repos = "https://cloud.r-project.org")
+    install.packages("e1071", repos = "https://cloud.r-project.org")
   }
   
-  # Set up cross-validation
-  ctrl <- trainControl(
-    method = "cv",            # Cross-validation
-    number = k_folds,         # Number of folds
-    classProbs = TRUE,        # Calculate class probabilities
-    summaryFunction = twoClassSummary,  # Use ROC summary
-    savePredictions = "final" # Save final predictions
-  )
+  # Ensure all numeric columns are properly typed
+  numeric_cols <- c("duration", "credit_amount", "installment_commitment", 
+                   "residence_since", "age", "existing_credits", "num_dependents")
   
-  # Create a tuning grid for SVM parameters
-  # For RBF kernel: Cost (C) and sigma
-  tuning_grid <- expand.grid(
-    sigma = c(0.01, 0.05, 0.1),  # Kernel parameter
-    C = c(0.1, 1, 10)            # Cost parameter
-  )
-  
-  # Train the model with error handling
-  tryCatch({
-    message("Training SVM model with Radial Basis Function kernel...")
-    
-    # Start timing
-    start_time <- proc.time()
-    
-    # Train the model with cross-validation and parameter tuning
-    # Use svmRadial method from kernlab through caret
-    svm_model <- train(
-      model_formula, 
-      data = train_data,
-      method = "svmRadial",     # RBF kernel
-      trControl = ctrl,
-      tuneGrid = tuning_grid,
-      metric = "ROC",
-      preProcess = NULL,        # Data already preprocessed
-      prob.model = TRUE         # Generate class probabilities
-    )
-    
-    # End timing
-    end_time <- proc.time()
-    train_time <- end_time - start_time
-    
-    message("Model training completed in ", round(train_time[3], 2), " seconds")
-    
-    # Print model summary
-    message("\nModel Summary:")
-    print(svm_model)
-    
-    # Print cross-validation results
-    message("\nCross-Validation Results:")
-    print(svm_model$results)
-    
-    # Print best tuning parameters
-    message("\nBest Tuning Parameters:")
-    print(svm_model$bestTune)
-    
-    # Store feature info in the model
-    attr(svm_model, "feature_info") <- prepared_data$feature_info
-    
-    return(svm_model)
-    
-  }, error = function(e) {
-    message("ERROR training SVM: ", e$message)
-    
-    # Try with a simpler approach if the original fails
-    message("Attempting with a simplified model...")
-    
-    # Train a simpler linear SVM model directly with e1071
-    if(requireNamespace("e1071", quietly = TRUE)) {
-      simple_model <- e1071::svm(
-        formula = model_formula,
-        data = train_data,
-        kernel = "linear",
-        cost = 1,
-        probability = TRUE,
-        scale = FALSE  # Data already scaled
-      )
-      
-      message("Simplified linear SVM model training completed")
-      return(simple_model)
-    } else {
-      stop("Could not train SVM model with either method")
+  for(col in numeric_cols) {
+    if(col %in% names(train_data)) {
+      train_data[[col]] <- as.numeric(as.character(train_data[[col]]))
     }
-  })
+  }
+  
+  # Train a simpler SVM model directly with e1071
+  message("Training SVM model with Radial Basis Function kernel...")
+  start_time <- proc.time()
+  
+  # Train model with cross-validation
+  cv_folds <- e1071::tune.control(cross = k_folds)
+  
+  # Tune SVM parameters
+  tuned_model <- e1071::tune.svm(
+    x = train_data[, setdiff(names(train_data), "class")],
+    y = train_data$class,
+    gamma = c(0.01, 0.05, 0.1),
+    cost = c(0.1, 1, 10),
+    tunecontrol = cv_folds,
+    kernel = "radial",
+    probability = TRUE,
+    scale = FALSE  # Data already scaled
+  )
+  
+  # Get best parameters
+  best_params <- tuned_model$best.parameters
+  
+  # Train final model with best parameters
+  final_model <- e1071::svm(
+    x = train_data[, setdiff(names(train_data), "class")],
+    y = train_data$class,
+    kernel = "radial",
+    gamma = best_params$gamma,
+    cost = best_params$cost,
+    probability = TRUE,
+    scale = FALSE  # Data already scaled
+  )
+  
+  # End timing
+  end_time <- proc.time()
+  train_time <- end_time - start_time
+  
+  message("Model training completed in ", round(train_time[3], 2), " seconds")
+  
+  # Print model summary
+  message("\nModel Summary:")
+  print(final_model)
+  
+  # Print cross-validation results
+  message("\nCross-Validation Results:")
+  print(tuned_model$performances)
+  
+  # Print best tuning parameters
+  message("\nBest Tuning Parameters:")
+  print(best_params)
+  
+  # Store feature info in the model
+  attr(final_model, "feature_info") <- prepared_data$feature_info
+  
+  return(final_model)
 }
 
 # Function to generate predictions using the trained model
@@ -220,43 +236,79 @@ generate_predictions <- function(model, test_data) {
   # Get feature info from model
   feature_info <- attr(model, "feature_info")
   if(is.null(feature_info)) {
-    warning("No feature info found in model. Predictions may fail if features don't match.")
-  } else {
-    # Ensure test data has all required features
-    missing_cols <- setdiff(feature_info$final_cols, names(test_data))
-    if(length(missing_cols) > 0) {
-      message("Adding missing dummy columns with 0 values: ", 
-              paste(missing_cols, collapse = ", "))
-      for(col in missing_cols) {
-        test_data[[col]] <- 0
+    stop("No feature info found in model. Cannot generate predictions.")
+  }
+  
+  # Create a data frame with the same structure as training data
+  pred_data <- data.frame(matrix(0, nrow = nrow(test_data), 
+                                ncol = length(feature_info$final_cols) - 1))  # -1 for class
+  names(pred_data) <- setdiff(feature_info$final_cols, "class")
+  
+  # Copy numeric columns
+  numeric_cols <- c("duration", "credit_amount", "installment_commitment", 
+                   "residence_since", "age", "existing_credits", "num_dependents")
+  
+  for(col in numeric_cols) {
+    if(col %in% names(test_data) && col %in% names(pred_data)) {
+      pred_data[[col]] <- as.numeric(as.character(test_data[[col]]))
+      pred_data[[col]][is.na(pred_data[[col]])] <- 0
+    }
+  }
+  
+  # Apply scaling to numeric columns
+  scaling_params <- feature_info$scaling_params
+  if(!is.null(scaling_params)) {
+    for(col in names(scaling_params)) {
+      if(col %in% names(pred_data)) {
+        pred_data[[col]] <- scale(pred_data[[col]], 
+                                center = scaling_params[[col]]$mean,
+                                scale = scaling_params[[col]]$sd)
+        pred_data[[col]] <- as.numeric(pred_data[[col]])
       }
     }
-    
-    # Ensure columns are in the same order as training
-    test_data <- test_data[, feature_info$final_cols]
   }
   
-  # Generate predictions
-  pred_class <- predict(model, test_data)
-  
-  # Handle different types of SVM models
-  if(inherits(model, "svm")) {
-    pred_prob <- predict(model, test_data, probability = TRUE)
-    prob_attr <- attr(pred_prob, "probabilities")
-    pos_class_prob <- prob_attr[, "Good"]
-  } else if(inherits(model, "train")) {
-    pred_prob <- predict(model, test_data, type = "prob")
-    pos_class_prob <- pred_prob[, "Good"]
-  } else {
-    warning("Unknown model type. Using dummy probabilities.")
-    pos_class_prob <- ifelse(pred_class == "Good", 0.75, 0.25)
+  # Handle dummy variables
+  for(col in names(feature_info$dummy_cols)) {
+    dummy_cols <- feature_info$dummy_cols[[col]]
+    # Create dummy variables for the current factor
+    if(col %in% names(test_data)) {
+      # Get the current value
+      current_value <- as.character(test_data[[col]])
+      # Set all dummy columns to 0
+      for(dummy_col in dummy_cols) {
+        pred_data[[dummy_col]] <- 0
+      }
+      # Set the appropriate dummy column to 1
+      for(i in seq_along(current_value)) {
+        matching_col <- paste0(col, current_value[i])
+        if(matching_col %in% dummy_cols) {
+          pred_data[i, matching_col] <- 1
+        }
+      }
+    }
   }
+  
+  # Ensure all columns are numeric
+  for(col in names(pred_data)) {
+    pred_data[[col]] <- as.numeric(pred_data[[col]])
+  }
+  
+  # Ensure columns are in the same order as training data
+  pred_data <- pred_data[, setdiff(feature_info$final_cols, "class")]
+  
+  # Generate probabilities
+  message("Generating predictions...")
+  pred_prob <- predict(model, pred_data, probability = TRUE)
+  pred_prob <- attr(pred_prob, "probabilities")[, "Good"]
+  
+  # Convert to class predictions
+  pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")
+  pred_class <- factor(pred_class, levels = c("Bad", "Good"))
   
   return(list(
     class = pred_class,
-    prob = pos_class_prob,
-    all_probs = if(exists("prob_attr")) prob_attr else 
-                data.frame(Bad = 1 - pos_class_prob, Good = pos_class_prob)
+    prob = pred_prob
   ))
 }
 

@@ -360,39 +360,6 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
     # Get model
     model_result <- all_results[[model_name]]
     
-    # Special handling for naive bayes
-    if(model_name == "naive_bayes") {
-      # Load the naive bayes preprocessing function
-      source("scripts/03_models/naive_bayes.R")
-      
-      # Preprocess test data to match training data format
-      test_data <- tryCatch({
-        # Assuming prepare_data() function exists in naive_bayes.R
-        prepared_test <- prepare_data(test_data)
-        
-        # Create bins if missing
-        if(!"duration_bin" %in% names(prepared_test)) {
-          prepared_test$duration_bin <- cut(prepared_test$duration, 
-                                          breaks = c(0, 12, 24, 36, 48, Inf),
-                                          labels = c("0-12", "13-24", "25-36", "37-48", "48+"))
-        }
-        if(!"credit_amount_bin" %in% names(prepared_test)) {
-          prepared_test$credit_amount_bin <- cut(prepared_test$credit_amount,
-                                               breaks = c(0, 5000, 10000, 15000, Inf),
-                                               labels = c("0-5k", "5k-10k", "10k-15k", "15k+"))
-        }
-        prepared_test
-      }, error = function(e) {
-        message("ERROR: Could not prepare test data for naive_bayes: ", e$message)
-        return(NULL)
-      })
-      
-      if(is.null(test_data)) {
-        message("WARNING: Skipping naive_bayes due to data preparation error")
-        next
-      }
-    }
-    
     # Skip if model not available
     if(is.null(model_result$model)) {
       message("WARNING: Model not available for ", model_name, ". Skipping...")
@@ -473,17 +440,14 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
       model_name <- names(pred_probs)[1]
       roc_obj <- pROC::roc(actual, pred_probs[[model_name]])
       
-      # Create base plot without duplicate arguments
+      # Create base plot
       plot(roc_obj, 
            main = "Comparison of ROC Curves",
            col = rainbow(length(pred_probs))[1], 
            lwd = 3,
            cex.main = 1.5,
            cex.lab = 1.2,
-           cex.axis = 1.1,
-           xlab = "False Positive Rate (1 - Specificity)",
-           ylab = "True Positive Rate (Sensitivity)",
-           print.auc = FALSE)
+           cex.axis = 1.1)
       
       # Add grid
       grid(nx = 10, ny = 10, col = "lightgray", lty = "dotted")
@@ -525,26 +489,17 @@ compare_roc_curves <- function(all_results, test_data, output_dir = "results/mod
       
       message("Successfully created ROC plot")
       
-    }, error = function(e) {
-      message("ERROR creating ROC plot: ", e$message)
-      return(NULL)
-    })
-    
-    # Verify file was created
-    if(file.exists(output_file)) {
-      message("Successfully saved combined ROC curves to ", output_file)
-    } else {
-      message("WARNING: Failed to save ROC curves to ", output_file)
-    }
-    
-    # Make sure we have results before returning
-    if(length(results) > 0 && length(auc_values) > 0) {
+      # Return results
       return(list(
         roc_results = results,
         auc_values = auc_values,
         output_file = output_file
       ))
-    }
+      
+    }, error = function(e) {
+      message("ERROR creating ROC plot: ", e$message)
+      return(NULL)
+    })
   }
   
   # Return NULL if we don't have enough data

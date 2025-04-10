@@ -1,2 +1,16 @@
 /data
 .Rproj.user
+/logs/
+
+*.html
+*.pdf
+*.docx
+*.doc
+*.txt
+*.csv
+*.xlsx
+*.xls
+
+*.Rmd
+
+*.Rhistory

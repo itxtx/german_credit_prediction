@@ -1,26 +1,26 @@
 === SVM MODEL SUMMARY ===
 
-Date:  2025-03-29 
+Date:  2025-04-10 
 
 PERFORMANCE METRICS:
-Accuracy: 0.6733
-Precision: 0.8544
-Recall: 0.6429
-F1: 0.7337
-Auc: 0.7639
+Accuracy: 0.5333
+Precision: 0.7612
+Recall: 0.4857
+F1: 0.593
+Auc: 0.6007
 
 CONFUSION MATRIX:
           Reference
 Prediction Bad Good
-      Bad   67   75
-      Good  23  135
+      Bad   58  108
+      Good  32  102
 
 DETAILED STATISTICS:
          Sensitivity          Specificity       Pos Pred Value 
-           0.6428571            0.7444444            0.8544304 
+           0.4857143            0.6444444            0.7611940 
       Neg Pred Value            Precision               Recall 
-           0.4718310            0.8544304            0.6428571 
+           0.3493976            0.7611940            0.4857143 
                   F1           Prevalence       Detection Rate 
-           0.7336957            0.7000000            0.4500000 
+           0.5930233            0.7000000            0.3400000 
 Detection Prevalence    Balanced Accuracy 
-           0.5266667            0.6936508 
+           0.4466667            0.5650794 

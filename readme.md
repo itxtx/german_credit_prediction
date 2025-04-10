@@ -6,94 +6,199 @@ This report presents the findings from a comprehensive credit risk modeling anal
 
 Several machine learning algorithms were evaluated, with the Random Forest model emerging as the best performer with an AUC of 0.7452. The model achieved a balanced accuracy of 66.03% in distinguishing between good and bad credit risks, demonstrating reasonable predictive power for credit decision support.
 
+
 ## Dataset Overview
+- Total samples: 1000
+- Class distribution: 700 good loans (70%), 300 bad loans (30%)
+- Features: 20 predictors (mix of categorical and numerical)
 
-The analysis utilized a structured dataset containing 21 variables related to customer attributes and credit behavior:
+## Data Preprocessing
+- Categorical variables converted to factors
+- Class variable transformed from numeric (1/2) to categorical (Good/Bad)
+- No missing values found in the dataset
+- Train/test split: 700 training samples, 300 test samples
+- Class distribution in both sets: 30% Bad, 70% Good
+- Removed "foreign_worker" due to near-zero variance (96.3% in one category)
+- Class imbalance addressed: balanced to 210 samples per class in training
+- 7 numeric features scaled
 
-- **Size**: 1,000 observations
-- **Features**: 20 predictor variables including checking account status, credit history, loan purpose, employment status, etc.
-- **Target Variable**: Binary classification of credit risk (Good/Bad)
-- **Class Distribution**: 70% Good Credit (700 observations), 30% Bad Credit (300 observations)
+## Model Performance Comparison
 
-## Data Preparation
+| Model | Accuracy | Precision | Recall | F1 | AUC |
+|-------|----------|-----------|--------|-----|-----|
+| XGBoost | 0.6767 | 0.8383 | 0.6667 | 0.7427 | 0.7761 |
+| Random Forest | 0.6667 | 0.8618 | 0.6238 | 0.7238 | 0.7743 |
+| Logistic Regression | 0.6600 | 0.8418 | 0.6333 | 0.7228 | 0.7575 |
+| Decision Tree | 0.6067 | 0.8239 | 0.5571 | 0.6648 | 0.6840 |
+| SVM | 0.5333 | 0.7612 | 0.4857 | 0.5930 | 0.6007 |
 
-The following data preparation steps were implemented to ensure optimal model performance:
+**Best model: XGBoost** (highest accuracy, F1 score, and AUC)
 
-1. **Missing Value Analysis**: No missing values were detected in the dataset
-2. **Near-Zero Variance Feature Removal**: One feature with near-zero variance ("foreign_worker") was removed
-3. **Class Imbalance Handling**: A combined over-sampling/under-sampling approach was applied to create a balanced training dataset with equal representation of both classes
-4. **Train-Test Split**: The data was divided into training (70%) and testing (30%) sets while maintaining the class distribution
+### Performance Metric Comparisons
 
-## Model Development and Evaluation
+![Accuracy Comparison](results/model_comparison/accuracy_comparison.png)
+*Figure 1: Comparison of accuracy across all models*
 
-Multiple classification algorithms were trained and evaluated to identify the most effective approach for credit risk prediction:
+![Precision Comparison](results/model_comparison/precision_comparison.png)
+*Figure 2: Comparison of precision across all models*
 
-| Model | Accuracy | Precision | Recall | F1-Score | AUC | Gini | KS Statistic |
-|-------|----------|-----------|--------|----------|-----|------|--------------|
-| Random Forest | 0.68 | 0.4741 | 0.6111 | 0.5340 | 0.7452 | 0.4903 | 0.4127 |
-| SVM (RBF Kernel) | 0.7167 | 0.5248 | 0.5889 | 0.5550 | 0.7325 | 0.4651 | 0.3667 |
-| Logistic Regression | 0.63 | 0.4266 | 0.6778 | 0.5236 | 0.7154 | 0.4309 | 0.3317 |
-| Naive Bayes | 0.3033 | 0.3010 | 1.0000 | 0.4627 | 0.7231 | 0.4462 | 0.3841 |
-| Decision Tree | 0.62 | 0.4130 | 0.6333 | 0.5000 | 0.6826 | 0.3652 | 0.3095 |
+![Recall Comparison](results/model_comparison/recall_comparison.png)
+*Figure 3: Comparison of recall across all models*
 
-### Model Performance Analysis
+![F1 Score Comparison](results/model_comparison/f1_comparison.png)
+*Figure 4: Comparison of F1 scores across all models*
 
-- **Random Forest** emerged as the best overall model with the highest AUC (0.7452) and Gini coefficient (0.4903)
-- **SVM with RBF Kernel** demonstrated the highest accuracy (71.67%) and precision (52.48%)
-- **Logistic Regression** showed good recall (67.78%) but lower precision
-- **Naive Bayes** had perfect recall but very poor precision, resulting in low overall accuracy
-- **Decision Tree** showed balanced performance but did not excel in any specific metric
+![AUC Comparison](results/model_comparison/auc_comparison.png)
+*Figure 5: Comparison of AUC values across all models*
 
-## Key Findings
+![All Metrics Comparison](results/model_comparison/all_metrics_comparison.png)
+*Figure 6: Comprehensive comparison of all performance metrics across models*
 
-1. **Most Important Predictors**: The models identified several significant predictors of credit risk:
-   - Checking account status (particularly A14, A13, and A12 categories)
-   - Loan duration (negative correlation with good credit)
-   - Age (positive correlation with good credit)
+## Confusion Matrices
 
-2. **Model Tradeoffs**:
-   - Random Forest provided the best balance between identifying good and bad credit risks
-   - SVM showed strong overall accuracy but identified fewer bad credit risks
-   - Naive Bayes identified all bad credit risks but with many false positives
+### XGBoost
+```
+          Reference
+Prediction Bad Good
+      Bad   63   70
+      Good  27  140
+```
 
-3. **Class Balancing Impact**:
-   - The balanced training approach significantly improved the models' ability to identify bad credit risks
-   - This came with a moderate cost in terms of false positives
+### Random Forest
+```
+          Reference
+Prediction Bad Good
+      Bad   69   79
+      Good  21  131
+```
 
-## Recommendations
+### Logistic Regression
+```
+          Reference
+Prediction Bad Good
+      Bad   65   77
+      Good  25  133
+```
 
-Based on the analysis results, we recommend the following actions:
+### Decision Tree
+```
+          Reference
+Prediction Bad Good
+      Bad   65   93
+      Good  25  117
+```
 
-1. **Model Deployment**: Implement the Random Forest model for credit risk assessment due to its superior overall performance and balanced prediction capabilities
+### SVM
+```
+          Reference
+Prediction Bad Good
+      Bad   58  108
+      Good  32  102
+```
 
-2. **Threshold Optimization**: Fine-tune the decision threshold based on business priorities:
-   - Increase threshold to reduce false positives (mistakenly denying credit to good customers)
-   - Decrease threshold to minimize false negatives (mistakenly approving bad credit risks)
+## Feature Importance
 
-3. **Feature Focus**: Prioritize key predictors in credit application assessments:
-   - Pay special attention to checking account status
-   - Consider loan duration as a major risk factor
-   - Include age as a contributing factor in risk assessment
+### Random Forest Top 10 Features
+| Feature | Gain |
+|---------|------|
+| checking_statusA14 | 16.36 |
+| credit_amount | 15.65 |
+| duration | 14.61 |
+| age_employment_ratio | 14.47 |
+| monthly_payment | 13.66 |
+| age | 11.64 |
+| installment_commitment | 6.25 |
+| employment_years | 5.88 |
+| residence_since | 5.20 |
+| credit_historyA34 | 4.47 |
 
-4. **Monitoring Plan**: Establish a regular validation process to:
-   - Track model performance over time
-   - Detect potential data drift
-   - Retrain models periodically with new data
+### Logistic Regression Significant Coefficients (p < 0.05)
+| Feature | Estimate | Std. Error | z value | p-value |
+|---------|----------|------------|---------|---------|
+| (Intercept) | -4.3531 | 1.5534 | -2.8024 | 0.0051 |
+| checking_statusA12 | 0.7288 | 0.3428 | 2.1262 | 0.0335 |
+| checking_statusA14 | 2.1780 | 0.3627 | 6.0049 | <0.0001 |
+| duration | -0.4112 | 0.1986 | -2.0710 | 0.0384 |
+| credit_historyA34 | 1.8801 | 0.8060 | 2.3328 | 0.0197 |
+| purposeA41 | 1.8666 | 0.6009 | 3.1064 | 0.0019 |
+| credit_amount | -0.5320 | 0.2344 | -2.2696 | 0.0232 |
+| savings_statusA65 | 0.9579 | 0.4061 | 2.3587 | 0.0183 |
+| installment_commitment | -0.4032 | 0.1592 | -2.5333 | 0.0113 |
+| housingA152 | 0.9054 | 0.3938 | 2.2995 | 0.0215 |
 
-5. **Explainability Framework**: Develop clear explanations for model decisions to:
-   - Satisfy regulatory requirements
-   - Provide transparent feedback to applicants
-   - Support manual review of borderline cases
+## Cross-Validation Results
 
-## Limitations and Future Work
+### Logistic Regression
+- ROC: 0.7707
+- Sensitivity: 0.7000
+- Specificity: 0.7143
 
-This analysis has several limitations that should be addressed in future work:
+### Random Forest
+```
+  mtry       ROC      Sens      Spec      ROCSD     SensSD     SpecSD
+1    4 0.7994898 0.7619048 0.6714286 0.04370257 0.04761905 0.05928524
+2    7 0.7934807 0.7523810 0.6761905 0.04777931 0.04937248 0.06208764
+3   11 0.7888889 0.7619048 0.6952381 0.04493073 0.06070261 0.07221786
+```
+Best parameters: mtry = 4
 
-1. **Feature Engineering**: Additional derived features could potentially improve model performance
-2. **Advanced Algorithms**: Testing ensemble methods and deep learning approaches may yield better results
-3. **External Data**: Incorporating macroeconomic indicators and additional customer data could enhance predictive power
-4. **Time-Series Validation**: Implementing temporal validation to better simulate real-world application
+### SVM
+```
+  gamma cost     error dispersion
+1  0.01  0.1 0.5238095 0.07338588
+2  0.05  0.1 0.4047619 0.08459923
+3  0.10  0.1 0.5047619 0.10799922
+4  0.01  1.0 0.2738095 0.02227177
+5  0.05  1.0 0.2761905 0.02580891
+6  0.10  1.0 0.2690476 0.03531523
+7  0.01 10.0 0.2738095 0.01458030
+8  0.05 10.0 0.2928571 0.02740682
+9  0.10 10.0 0.2904762 0.02468624
+```
+Best parameters: gamma = 0.1, cost = 1
 
-## Conclusion
+## Data Characteristics
 
-The credit risk modeling analysis successfully identified Random Forest as the most effective algorithm for predicting credit risk in the given dataset. With an AUC of 0.7452 and balanced performance across metrics, this model provides a reliable foundation for credit decision support. By implementing the recommended actions, the organization can improve credit risk assessment accuracy while maintaining a balanced approach to customer approval.
+### Key Feature Distributions
+- checking_status: A11 (27.4%), A12 (26.9%), A13 (6.3%), A14 (39.4%)
+- credit_history: A30 (4.0%), A31 (4.9%), A32 (53.0%), A33 (8.8%), A34 (29.3%)
+- purpose: A40 (23.4%), A41 (10.3%), A42 (18.1%), A43 (28.0%), other categories < 10%
+- savings_status: A61 (60.3%), A62 (10.3%), A63 (6.3%), A64 (4.8%), A65 (18.3%)
+- employment: A71 (6.2%), A72 (17.2%), A73 (33.9%), A74 (17.4%), A75 (25.3%)
+
+### Numeric Feature Statistics
+- duration (months): Min=4, Q1=12, Median=18, Mean=20.9, Q3=24, Max=72
+- credit_amount: Min=250, Q1=1366, Median=2320, Mean=3271, Q3=3972, Max=18424
+- age: Min=19, Q1=27, Median=33, Mean=35.55, Q3=42, Max=75
+
+## Visual Performance Comparison
+
+![All Metrics Comparison](results/model_comparison/all_metrics_comparison.png)
+*Figure 7: Side-by-side comparison of all performance metrics across models*
+
+## Observations and Recommendations
+
+1. **Model Selection**: XGBoost performed best overall with the highest accuracy (67.67%), F1 score (0.7427), and AUC (0.7761), making it the recommended model for this credit risk classification task.
+
+2. **Feature Importance**: Checking account status (particularly level A14), credit amount, and loan duration are consistently the most important predictors across models. These should be prioritized in the credit decision process.
+
+3. **Model Performance Patterns**:
+   - All models have higher precision than recall, indicating they're better at identifying good loans than bad ones
+   - The false positive rate (predicting Bad when actually Good) is a consistent issue across all models
+   - Random Forest has the highest precision (0.8618)
+   - XGBoost has the best balance of precision and recall (highest F1 score)
+
+4. **Trade-offs**:
+   - If minimizing incorrectly denied good loans is a priority, consider Random Forest (highest precision)
+   - If identifying bad loans is more important, XGBoost offers the best recall among the top models
+   - If overall balanced performance is required, XGBoost provides the best F1 score
+
+5. **SVM Performance**: The SVM model underperformed compared to other models, possibly due to the complexity of the feature space or parameter tuning issues.
+
+6. **Naive Bayes**: The Naive Bayes model generated warnings about missing features and had inconsistent feature alignments, which may have affected its performance (metrics not shown in the final comparison).
+
+7. **Improvement Opportunities**:
+   - Feature engineering for better risk indicators
+   - Testing advanced ensemble methods
+   - Exploring cost-sensitive learning approaches
+   - Implementing a threshold adjustment strategy to balance precision and recall

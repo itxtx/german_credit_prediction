@@ -66,6 +66,22 @@ prepare_for_xgboost <- function(train_data = NULL, test_data) {
     features <- setdiff(names(train_xgb), "target")
     train_matrix <- as.matrix(train_xgb[, features])
     train_label <- train_xgb$target
+    
+    # Ensure test data has the same features as training data
+    missing_features <- setdiff(features, names(test_xgb))
+    if (length(missing_features) > 0) {
+      message("Adding missing features to test data: ", paste(missing_features, collapse = ", "))
+      for (feature in missing_features) {
+        test_xgb[[feature]] <- 0
+      }
+    }
+    
+    # Remove any extra features from test data that aren't in training data
+    extra_features <- setdiff(names(test_xgb), c(features, "class"))
+    if (length(extra_features) > 0) {
+      message("Removing extra features from test data: ", paste(extra_features, collapse = ", "))
+      test_xgb <- test_xgb[, !names(test_xgb) %in% extra_features]
+    }
   } else {
     # If no training data, process test data independently
     factor_cols <- names(test_xgb)[sapply(test_xgb, is.factor)]
@@ -87,7 +103,12 @@ prepare_for_xgboost <- function(train_data = NULL, test_data) {
   test_xgb$target <- as.numeric(test_xgb$class == "Good")
   test_xgb$class <- NULL
   
-  test_matrix <- as.matrix(test_xgb[, features])
+  # Ensure test data has the same features as training data
+  if (!is.null(train_matrix)) {
+    test_matrix <- as.matrix(test_xgb[, features])
+  } else {
+    test_matrix <- as.matrix(test_xgb[, features])
+  }
   test_label <- test_xgb$target
   
   # Ensure all matrices are numeric
@@ -109,37 +130,10 @@ prepare_for_xgboost <- function(train_data = NULL, test_data) {
 train_xgboost_model <- function(train_data, target_col = "class") {
   message("\n=== Training XGBoost Model ===")
   
-  # Create a copy of the data to avoid modifying the original
-  data <- train_data
-  
-  # Convert target to numeric (0/1)
-  y <- as.numeric(data[[target_col]] == "Good")
-  
-  # Remove target column from features
-  X <- data[, !names(data) %in% target_col, drop = FALSE]
-  
-  # Identify numeric and factor columns
-  factor_cols <- names(X)[sapply(X, is.factor)]
-  numeric_cols <- names(X)[sapply(X, is.numeric)]
-  
-  # Create dummy variables for factor columns
-  if(length(factor_cols) > 0) {
-    # Create model matrix for categorical variables
-    factor_matrix <- model.matrix(~ . - 1, data = X[, factor_cols, drop = FALSE])
-    
-    # If there are numeric columns, combine them with the dummy variables
-    if(length(numeric_cols) > 0) {
-      X_processed <- cbind(as.matrix(X[, numeric_cols, drop = FALSE]), factor_matrix)
-    } else {
-      X_processed <- factor_matrix
-    }
-  } else {
-    # If no factor columns, just convert numeric columns to matrix
-    X_processed <- as.matrix(X[, numeric_cols, drop = FALSE])
-  }
-  
-  # Ensure all data is numeric
-  storage.mode(X_processed) <- "numeric"
+  # Prepare data using the same function we'll use for prediction
+  prepared_data <- prepare_for_xgboost(train_data, train_data)
+  X_processed <- prepared_data$train_matrix
+  y <- prepared_data$train_label
   
   # Create DMatrix
   dtrain <- xgb.DMatrix(data = X_processed, label = y)
@@ -172,15 +166,26 @@ train_xgboost_model <- function(train_data, target_col = "class") {
 generate_predictions <- function(model, test_data) {
   message("\n=== Generating Predictions ===")
   
-  # If test_data is not a matrix, convert it
-  if(!inherits(test_data, "xgb.DMatrix")) {
-    if(is.data.frame(test_data)) {
-      test_data <- prepare_for_xgboost(NULL, test_data)$test_matrix
-    }
+  # If test_data is a matrix, use it directly
+  if(is.matrix(test_data)) {
+    test_matrix <- test_data
+  } else {
+    # Prepare test data using the same function as training
+    prepared_data <- prepare_for_xgboost(NULL, test_data)
+    test_matrix <- prepared_data$test_matrix
   }
   
+  # Ensure test matrix has the same feature names as the model
+  if (!is.null(model$feature_names)) {
+    # Reorder columns to match model's feature names
+    test_matrix <- test_matrix[, model$feature_names, drop = FALSE]
+  }
+  
+  # Create DMatrix
+  dtest <- xgb.DMatrix(data = test_matrix)
+  
   # Generate probabilities
-  pred_prob <- predict(model, test_data)
+  pred_prob <- predict(model, dtest)
   
   # Convert to class predictions
   pred_class <- ifelse(pred_prob > 0.5, "Good", "Bad")

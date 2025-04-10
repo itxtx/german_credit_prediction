@@ -1,8 +1,24 @@
 # ======= 05_analysis.R =======
 # This script provides a modular workflow for the German Credit Risk Analysis
 
+# Set working directory to project root
+if (!require(here)) {
+  install.packages("here")
+  library(here)
+}
+project_root <- here()
+setwd(project_root)
+
 # Record start time
 start_time <- Sys.time()
+
+# Create log file with timestamp
+log_file <- "/app/logs/analysis_log_20250410_154452.txt"  # Absolute path within container
+#dir.create("../logs", showWarnings = FALSE, recursive = TRUE)
+
+# Start logging
+sink(log_file, append = TRUE, split = TRUE)  # split=TRUE keeps output in console as well
+cat("Logging started at:", format(start_time, "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 # Create a function to run a script and measure its execution time
 run_script <- function(script_path, script_name) {
@@ -130,9 +146,16 @@ if (!exists("SKIP_EXECUTION")) {
   cat("==================================================================\n")
   cat("End time:", format(end_time, "%Y-%m-%d %H:%M:%S"), "\n")
   cat("Total duration:", format(total_duration, digits = 2), "\n\n")
+  
+  # Stop logging
+  sink()
+  cat("Analysis log saved to:", log_file, "\n")
 } else {
   cat("\nScript loaded without execution. Use run_workflow() to run analysis.\n")
   cat("Example usage:\n")
   cat("- run_workflow()  # Run all phases\n")
   cat("- run_workflow(c('setup', 'data_preparation'))  # Run specific phases\n")
+  
+  # Stop logging
+  sink()
 }
