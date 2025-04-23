@@ -171,10 +171,6 @@ Best parameters: gamma = 0.1, cost = 1
 - credit_amount: Min=250, Q1=1366, Median=2320, Mean=3271, Q3=3972, Max=18424
 - age: Min=19, Q1=27, Median=33, Mean=35.55, Q3=42, Max=75
 
-## Visual Performance Comparison
-
-![All Metrics Comparison](results/model_comparison/all_metrics_comparison.png)
-*Figure 7: Side-by-side comparison of all performance metrics across models*
 
 ## Observations and Recommendations
 
